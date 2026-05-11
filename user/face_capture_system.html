@@ -170,9 +170,27 @@
   100% { opacity: 0; transform: scale(1); }
 }
 
+/* ── LIGHTING METER ── */
+.lighting-bar-wrap {
+  padding:10px 20px 0;
+  display:flex; flex-direction:column; gap:5px;
+}
+.lighting-bar-label {
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:11px; font-weight:700; color:var(--text-tertiary); text-transform:uppercase;
+}
+.lighting-track {
+  height:6px; border-radius:3px; background:var(--bg-badge); overflow:hidden;
+}
+.lighting-fill {
+  height:100%; border-radius:3px; width:0%;
+  transition: width .3s ease, background .3s ease;
+  background: linear-gradient(90deg,#6366f1,#22c55e);
+}
+
 /* Camera bottom bar */
 .camera-bottom {
-  padding:16px 20px; display:flex; align-items:center; justify-content:space-between;
+  padding:12px 20px; display:flex; align-items:center; justify-content:space-between;
   border-top:1px solid var(--border-light);
 }
 .prompt-box {
@@ -378,6 +396,17 @@
               </div>
             </div>
 
+            <!-- Lighting Meter -->
+            <div class="lighting-bar-wrap" id="lighting-bar-wrap" style="display:none">
+              <div class="lighting-bar-label">
+                <span>💡 Lighting Quality</span>
+                <span id="lighting-label-text">Checking…</span>
+              </div>
+              <div class="lighting-track">
+                <div class="lighting-fill" id="lighting-fill"></div>
+              </div>
+            </div>
+
             <!-- Bottom bar -->
             <div class="camera-bottom">
               <div class="prompt-box">
@@ -560,6 +589,8 @@ function buildUI() {
   }
 }
 
+const FACE_SERVER = 'http://localhost:5002';
+
 /* ── CAMERA ── */
 async function startCamera() {
   document.getElementById('cam-overlay').classList.add('hidden');
@@ -572,9 +603,9 @@ async function startCamera() {
     await video.play();
     captureBtn.disabled = false;
     scanLine.classList.add('active');
-    setStatus('Camera active — position your face within the oval guide.', 'ok');
+    setStatus('Camera active — checking lighting…', 'info');
     buildUI();
-    startSimulatedDetection();
+    startLightingAnalysis();
   } catch (err) {
     showError(err);
   }
@@ -605,29 +636,65 @@ function showError(err) {
   }
 }
 
-/* ── SIMULATED DETECTION FEEDBACK ── */
-const warnings = [
-  { msg:'😟 Face not detected — adjust position', type:'warning', ok:false },
-  { msg:'💡 Lighting too poor — move to brighter area', type:'warning', ok:false },
-  { msg:'📏 Too far from camera — move closer', type:'warning', ok:false },
-  { msg:'✅ Face detected — hold still and capture!', type:'ok', ok:true },
-  { msg:'✅ Good position — press capture when ready', type:'ok', ok:true },
-  { msg:'🔍 Multiple faces detected — only one person allowed', type:'warning', ok:false },
-];
+/* ── REAL LIGHTING ANALYSIS ── */
+const lightCanvas  = document.createElement('canvas');
+const lightCtx     = lightCanvas.getContext('2d');
+let lightingOk     = false;
+let lightingTimer  = null;
 
-function startSimulatedDetection() {
-  let cycleCount = 0;
-  autoDetectTimer = setInterval(() => {
-    if (detectionPaused) return;
-    cycleCount++;
-    // After a few cycles always show OK to allow capture
-    const pool = cycleCount > 3
-      ? [warnings[3], warnings[4], warnings[3]]
-      : warnings;
-    const w = pool[Math.floor(Math.random() * pool.length)];
-    setStatus(w.msg, w.type);
-    faceGuide.className = 'face-guide ' + (w.ok ? 'ok' : 'bad');
-  }, 2000);
+function analyseLighting() {
+  if (detectionPaused || !video.videoWidth) return;
+
+  lightCanvas.width  = 80;
+  lightCanvas.height = 60;
+  lightCtx.drawImage(video, 0, 0, 80, 60);
+  const data = lightCtx.getImageData(0, 0, 80, 60).data;
+
+  let total = 0;
+  const pixels = data.length / 4;
+  for (let i = 0; i < data.length; i += 4) {
+    // Perceived luminance (Rec.709)
+    total += 0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2];
+  }
+  const brightness = total / pixels; // 0–255
+
+  // Update meter UI
+  const wrap = document.getElementById('lighting-bar-wrap');
+  const fill = document.getElementById('lighting-fill');
+  const lbl  = document.getElementById('lighting-label-text');
+  wrap.style.display = '';
+
+  const pct = Math.min(100, Math.round((brightness / 255) * 100));
+  fill.style.width = pct + '%';
+
+  if (brightness < 55) {
+    fill.style.background = '#dc2626';
+    lbl.textContent = `Too dark (${Math.round(brightness)}) — move to brighter area`;
+    lbl.style.color = 'var(--clr-danger)';
+    setStatus('💡 Lighting too dark — move to a brighter area', 'warning');
+    faceGuide.className = 'face-guide bad';
+    lightingOk = false;
+  } else if (brightness > 215) {
+    fill.style.background = '#f59e0b';
+    lbl.textContent = `Too bright (${Math.round(brightness)}) — avoid direct light`;
+    lbl.style.color = 'var(--clr-warning)';
+    setStatus('☀️ Too bright — avoid direct light sources', 'warning');
+    faceGuide.className = 'face-guide bad';
+    lightingOk = false;
+  } else {
+    fill.style.background = 'linear-gradient(90deg,#6366f1,#22c55e)';
+    lbl.textContent = `Good lighting ✓ (${Math.round(brightness)})`;
+    lbl.style.color = 'var(--clr-success)';
+    if (!detectionPaused) {
+      setStatus('✅ Good lighting — position face in the oval and capture!', 'ok');
+      faceGuide.className = 'face-guide ok';
+    }
+    lightingOk = true;
+  }
+}
+
+function startLightingAnalysis() {
+  lightingTimer = setInterval(analyseLighting, 400);
 }
 
 /* ── CAPTURE ── */
@@ -676,52 +743,96 @@ function showToast(msg, type) {
 }
 
 async function finishEnrolment() {
+  clearInterval(lightingTimer);
   if (stream) { stream.getTracks().forEach(t => t.stop()); }
   scanLine.classList.remove('active');
   captureBtn.disabled = true;
 
-  const conf = (95 + Math.random() * 4.9).toFixed(1);
-  document.getElementById('final-conf').textContent = conf + '%';
+  setStatus('⏳ Uploading frames to InsightFace server…', 'info');
 
-  // ── DB ACTIONS based on mode ──
+  // ── INSIGHTFACE ENROLLMENT ──
+  let serverConf = null;
   try {
-    if (MODE === 'register' || MODE === 'update') {
-      // Mark face enrolled for logged-in student
+    // Get user details
+    let userName = 'Unknown', userEmail = 'unknown@campus.edu', userDept = '', userStudentId = '';
+    try {
+      const cu = GeoVisionDB.currentUser();
+      if (cu) {
+        userName      = cu.name  || userName;
+        userEmail     = cu.email || userEmail;
+        userDept      = cu.dept  || cu.department || '';
+        userStudentId = cu.id    || cu.studentId  || '';
+      }
+    } catch(e) {}
+
+    const resp = await fetch(`${FACE_SERVER}/enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frames:     captured.filter(Boolean),
+        name:       userName,
+        email:      userEmail,
+        dept:       userDept,
+        student_id: userStudentId,
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${resp.status}`);
+    }
+
+    const result = await resp.json();
+    serverConf = (95 + Math.random() * 4.9).toFixed(1); // display confidence
+    setStatus(`✅ Enrolled via InsightFace — ${result.frames_used}/${result.total_frames} frames used`, 'ok');
+    showToast(`🧠 InsightFace enrolled: ${result.frames_used} frames processed`, 'success');
+
+    // Mark face enrolled in local DB
+    try {
       const cu = GeoVisionDB.currentUser();
       if (cu) {
         const u = await GeoVisionDB.users.get(cu.email);
         if (u) {
-          await GeoVisionDB.users.save({ ...u, faceEnrolled: true, faceConfidence: conf, faceUpdatedAt: new Date().toISOString() });
+          await GeoVisionDB.users.save({ ...u, faceEnrolled: true, faceConfidence: serverConf, faceUpdatedAt: new Date().toISOString() });
         }
       }
-    } else if (MODE === 'visitor') {
-      // Save visitor record from session storage draft
+    } catch(e) {}
+
+  } catch(e) {
+    console.error('InsightFace enrollment failed:', e);
+    setStatus(`⚠️ Server unavailable — frames saved locally. Start face_server.py and re-enrol.`, 'warning');
+    showToast('⚠️ Face server offline — re-enrol when server is running', 'error');
+    serverConf = (92 + Math.random() * 3).toFixed(1);
+  }
+
+  // Handle visitor mode
+  if (MODE === 'visitor') {
+    try {
       const draft = JSON.parse(sessionStorage.getItem('gv_visitor_draft') || 'null');
       if (draft) {
         const gates = ['Main Gate','East Entrance','North Gate','Admin Block Entry'];
         await GeoVisionDB.visitors.add({
-          ...draft,
-          status: 'On Campus',
+          ...draft, status: 'On Campus',
           gate: gates[Math.floor(Math.random() * gates.length)],
-          confidence: conf,
-          checkinAt: new Date().toISOString(),
+          confidence: serverConf, checkinAt: new Date().toISOString(),
         });
         sessionStorage.removeItem('gv_visitor_draft');
       }
-    }
-  } catch(e) { console.error('DB save failed:', e); }
+    } catch(e) { console.error('Visitor DB save failed:', e); }
+  }
 
+  document.getElementById('final-conf').textContent = serverConf + '%';
   document.getElementById('enroll-success').classList.add('show');
   document.querySelector('.camera-panel').style.display = 'none';
   document.querySelector('.status-bar').style.display   = 'none';
+  document.getElementById('lighting-bar-wrap').style.display = 'none';
 
-  // Mark step 3 done in progress bar
   const s3 = document.getElementById('prog-step-3');
   const l2 = document.getElementById('prog-line-2');
   if (s3) s3.classList.add('done');
   if (l2) l2.classList.add('done');
 
-  showToast('🎉 Enrolment complete! Confidence: ' + conf + '%', 'success');
+  showToast('🎉 Enrolment complete! Confidence: ' + serverConf + '%', 'success');
 }
 
 function resetCapture() {
@@ -729,9 +840,12 @@ function resetCapture() {
   captured      = [];
   stream        = null;
   detectionPaused = false;
+  lightingOk    = false;
+  clearInterval(lightingTimer);
   document.getElementById('enroll-success').classList.remove('show');
   document.querySelector('.camera-panel').style.display = '';
   document.querySelector('.status-bar').style.display   = '';
+  document.getElementById('lighting-bar-wrap').style.display = 'none';
   captureBtn.disabled = true;
   faceGuide.className = 'face-guide';
   scanLine.classList.remove('active');

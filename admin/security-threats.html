@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -545,6 +545,60 @@ function simulateThreat() {
   setTimeout(simulateThreat, 12000 + Math.random() * 15000);
 }
 setTimeout(simulateThreat, 8000);
+
+/* ── REAL-TIME RECOGNITION INTEGRATION ── */
+const FACE_SERVER = 'http://localhost:5002';
+const recogBC = new BroadcastChannel('gv_recognition');
+
+// BroadcastChannel — live events from cctv-feed tab
+recogBC.onmessage = (evt) => {
+  const msg = evt.data;
+  if (msg.type === 'threat') {
+    // Unknown face detected — add as real threat
+    addRecognitionThreat(msg.camera || 'Camera 0 — Live', msg.confidence);
+  }
+};
+
+// SSE fallback (for when cctv-feed.html is not open)
+let sseSource = null;
+function connectSSE() {
+  if (sseSource) return;
+  try {
+    sseSource = new EventSource(`${FACE_SERVER}/events`);
+    sseSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'recognition' && data.data && !data.data.matched && data.data.face_count > 0) {
+          addRecognitionThreat(data.data.camera || 'Live Camera', data.data.confidence);
+        }
+      } catch(_) {}
+    };
+    sseSource.onerror = () => {
+      sseSource.close(); sseSource = null;
+      setTimeout(connectSSE, 8000); // retry
+    };
+  } catch(e) {}
+}
+connectSSE();
+
+function addRecognitionThreat(camera, confidence) {
+  const tpl = THREAT_TEMPLATES[0]; // 'Unknown face detected'
+  const sev = (confidence && confidence < 30) ? 'Critical' : 'High';
+  const gate = camera;
+  const t = {
+    icon: '🚫', title: 'Unknown face — Live Recognition',
+    gate, type: 'Unauthorized Access (AI)',
+    severity: sev, status: 'Active', time: new Date(),
+    lat: 12.9 + (Math.random()-.5)*.02,
+    lng: 77.5 + (Math.random()-.5)*.02,
+  };
+  threats.unshift(t);
+  if (threats.length > 15) threats.pop();
+  activeCount++;
+  document.getElementById('c-active').textContent = threats.filter(x => x.status==='Active').length;
+  renderThreats();
+  showToast(`🚫 AI: Unknown face at ${camera}`, 'error');
+}
 </script>
 </body>
 </html>

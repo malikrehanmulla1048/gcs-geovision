@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -62,6 +62,8 @@
   cursor: pointer;
 }
 .cam-card:hover { border-color: var(--clr-primary); transform: translateY(-2px); box-shadow:var(--shadow-card-hover); }
+.cam-card.live-card { border-color: rgba(220,38,38,.5); box-shadow: 0 0 0 2px rgba(220,38,38,.15); }
+.cam-card.live-card:hover { border-color: var(--clr-primary); }
 
 .cam-feed {
   width: 100%;
@@ -72,7 +74,10 @@
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
 }
+.cam-feed video { width:100%; height:100%; object-fit:cover; display:block; }
+
 .cam-tag {
   background: rgba(0,0,0,0.6);
   border: 1px solid rgba(255,255,255,0.1);
@@ -83,6 +88,41 @@
   letter-spacing: 0.8px;
   color: #fff;
 }
+.cam-tag-live {
+  position:absolute; top:10px; left:10px; z-index:5;
+  display:inline-flex; align-items:center; gap:5px;
+  background: rgba(220,38,38,.85); color:#fff;
+  padding:4px 10px; border-radius:var(--radius-full);
+  font-size:10px; font-weight:800; letter-spacing:.8px;
+  backdrop-filter: blur(4px);
+}
+
+/* Face detection overlay boxes */
+.face-box {
+  position:absolute; border:2px solid #22c55e;
+  border-radius:4px; pointer-events:none;
+  box-shadow: 0 0 10px rgba(34,197,94,.5);
+  transition: all .1s linear;
+}
+.face-box.unknown { border-color: #dc2626; box-shadow: 0 0 10px rgba(220,38,38,.5); }
+.face-label {
+  position:absolute; top:-22px; left:0;
+  background:#22c55e; color:#fff;
+  font-size:9px; font-weight:700; padding:2px 6px; border-radius:3px;
+  white-space:nowrap; max-width:150px; overflow:hidden; text-overflow:ellipsis;
+}
+.face-label.unknown { background:#dc2626; }
+
+/* Recognition status bar inside live card */
+.recog-bar {
+  position:absolute; bottom:0; left:0; right:0;
+  background:rgba(0,0,0,.7); backdrop-filter:blur(4px);
+  padding:6px 12px; display:flex; align-items:center; gap:8px;
+  font-size:11px; color:#fff; z-index:4;
+}
+.recog-bar-name { font-weight:700; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.recog-bar-conf { font-weight:800; color:#22c55e; flex-shrink:0; }
+.recog-bar-conf.threat { color:#dc2626; }
 
 .cam-body { padding: 16px; }
 .cam-top {
@@ -103,6 +143,7 @@
 .cam-alert { background: var(--clr-danger-ghost); color: var(--clr-danger); border: 1px solid rgba(220,38,38,0.3); }
 .cam-warning { background: var(--clr-warning-ghost); color: var(--clr-warning); border: 1px solid rgba(245,158,11,0.3); }
 .cam-normal { background: var(--clr-success-ghost); color: var(--clr-success); border: 1px solid rgba(34,197,94,0.3); }
+.cam-live { background: rgba(220,38,38,.15); color: var(--clr-danger); border: 1px solid rgba(220,38,38,0.5); }
 
 .cam-stats {
   display: grid;
@@ -197,9 +238,45 @@
       </div>
 
       <div class="cctv-grid">
-        <!-- 1 -->
-        <div class="cam-card">
-          <div class="cam-feed" style="background:url('../assets/cctv_main_gate.png') center/cover;"><div class="cam-tag">MAIN ENTRANCE</div></div>
+      <!-- 0: LIVE WEBCAM RECOGNITION -->
+      <div class="cam-card live-card" id="live-cam-card">
+        <div class="cam-feed" id="live-cam-feed" style="cursor:default;">
+          <!-- Live video element -->
+          <video id="live-video" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+          <canvas id="live-canvas" style="display:none;"></canvas>
+          <!-- Face overlay container -->
+          <div id="face-overlay" style="position:absolute;inset:0;pointer-events:none;"></div>
+          <!-- Live badge -->
+          <div class="cam-tag-live"><div class="live-dot"></div> LIVE AI</div>
+          <!-- Start button overlay -->
+          <div id="live-start-overlay" style="position:absolute;inset:0;background:rgba(0,0,0,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:10;">
+            <div style="font-size:32px;">📹</div>
+            <div style="color:#fff;font-size:13px;font-weight:700;">Live Recognition Feed</div>
+            <button onclick="startLiveRecognition()" style="padding:8px 20px;background:var(--clr-primary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">▶ Start</button>
+          </div>
+          <!-- Recognition status bar -->
+          <div class="recog-bar" id="recog-bar" style="display:none;">
+            <span style="font-size:14px;">🔍</span>
+            <span class="recog-bar-name" id="recog-bar-name">Scanning…</span>
+            <span class="recog-bar-conf" id="recog-bar-conf"></span>
+          </div>
+        </div>
+        <div class="cam-body">
+          <div class="cam-top">
+            <h4>Camera 0 — Live Recognition</h4>
+            <span class="cam-badge cam-live" id="live-status-badge">OFFLINE</span>
+          </div>
+          <div class="cam-time" id="live-last-event">Awaiting start…</div>
+          <div class="cam-stats">
+            <div class="c-stat"><div class="c-stat-label">Faces</div><div class="c-stat-val" id="live-stat-faces">0</div></div>
+            <div class="c-stat"><div class="c-stat-label">Matches</div><div class="c-stat-val" id="live-stat-matches">0</div></div>
+            <div class="c-stat"><div class="c-stat-label">Threats</div><div class="c-stat-val" id="live-stat-threats" style="color:var(--clr-danger)">0</div></div>
+          </div>
+        </div>
+      </div>
+      <!-- 1 -->
+      <div class="cam-card">
+        <div class="cam-feed" style="background:url('../assets/cctv_main_gate.png') center/cover;"><div class="cam-tag">MAIN ENTRANCE</div></div>
           <div class="cam-body">
             <div class="cam-top">
               <h4>Camera 1 — Main Gate</h4>
@@ -334,6 +411,124 @@
 
 <div class="toast-container" id="toast-container"></div>
 <script src="../css/shell.js"></script>
+<script>
+const FACE_SERVER = 'http://localhost:5002';
+const bc = new BroadcastChannel('gv_recognition');
+
+let liveStream = null;
+let liveMatchCount = 0;
+let liveThreatCount = 0;
+let liveFaceCount = 0;
+let recogRunning = false;
+let recogInterval = null;
+
+async function startLiveRecognition() {
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:720} } });
+    const video = document.getElementById('live-video');
+    video.srcObject = liveStream;
+    video.style.display = 'block';
+    await video.play();
+    document.getElementById('live-start-overlay').style.display = 'none';
+    document.getElementById('recog-bar').style.display = 'flex';
+    document.getElementById('live-status-badge').textContent = 'LIVE';
+    document.getElementById('live-status-badge').className = 'cam-badge cam-live';
+    recogRunning = true;
+    recogInterval = setInterval(runRecognition, 350);
+  } catch(e) {
+    alert('Camera access denied: ' + e.message);
+  }
+}
+
+async function runRecognition() {
+  if (!recogRunning) return;
+  const video  = document.getElementById('live-video');
+  const canvas = document.getElementById('live-canvas');
+  if (!video.videoWidth) return;
+
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL('image/jpeg', 0.7);
+
+  try {
+    const resp = await fetch(`${FACE_SERVER}/recognize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frame: b64, camera: 'Camera 0 — Live Recognition' })
+    });
+    if (!resp.ok) return;
+    const result = await resp.json();
+
+    // Update face overlay
+    updateFaceOverlay(result);
+
+    // Update stats
+    document.getElementById('live-stat-faces').textContent = result.face_count || 0;
+
+    const now = new Date().toLocaleTimeString();
+
+    if (result.matched) {
+      liveMatchCount++;
+      document.getElementById('live-stat-matches').textContent = liveMatchCount;
+      document.getElementById('recog-bar-name').textContent = `✅ ${result.name} (${result.dept || 'N/A'})`;
+      document.getElementById('recog-bar-conf').textContent = result.confidence + '%';
+      document.getElementById('recog-bar-conf').className = 'recog-bar-conf';
+      document.getElementById('live-last-event').textContent = `Last match · ${now}`;
+      document.getElementById('live-status-badge').textContent = 'MATCH';
+      document.getElementById('live-status-badge').className = 'cam-badge cam-normal';
+
+      // Broadcast entry to other pages
+      bc.postMessage({ type: 'entry', ...result, timestamp: new Date().toISOString() });
+    } else if (result.face_count > 0) {
+      liveThreatCount++;
+      document.getElementById('live-stat-threats').textContent = liveThreatCount;
+      document.getElementById('recog-bar-name').textContent = '🚫 Unknown face detected';
+      document.getElementById('recog-bar-conf').textContent = (result.confidence || 0) + '% sim.';
+      document.getElementById('recog-bar-conf').className = 'recog-bar-conf threat';
+      document.getElementById('live-last-event').textContent = `Threat detected · ${now}`;
+      document.getElementById('live-status-badge').textContent = 'THREAT';
+      document.getElementById('live-status-badge').className = 'cam-badge cam-alert';
+
+      // Broadcast threat
+      bc.postMessage({ type: 'threat', camera: 'Camera 0 — Live Recognition', confidence: result.confidence, timestamp: new Date().toISOString() });
+    } else {
+      document.getElementById('recog-bar-name').textContent = 'Scanning for faces…';
+      document.getElementById('recog-bar-conf').textContent = '';
+      document.getElementById('live-status-badge').textContent = 'LIVE';
+      document.getElementById('live-status-badge').className = 'cam-badge cam-live';
+    }
+  } catch(e) {
+    // Server offline — silent fail, don't spam errors
+    document.getElementById('recog-bar-name').textContent = '⚠️ Face server offline';
+    document.getElementById('recog-bar-conf').textContent = '';
+  }
+}
+
+function updateFaceOverlay(result) {
+  const overlay = document.getElementById('face-overlay');
+  overlay.innerHTML = '';
+  if (!result.face_count) return;
+
+  const feed   = document.getElementById('live-cam-feed');
+  const vw     = feed.offsetWidth;
+  const vh     = feed.offsetHeight;
+
+  // Simple centered face box (real bbox coords come from backend if needed)
+  const isMatch = result.matched;
+  const box = document.createElement('div');
+  box.className = 'face-box' + (isMatch ? '' : ' unknown');
+  const bw = vw * 0.28, bh = vh * 0.6;
+  box.style.cssText = `left:${(vw-bw)/2}px;top:${(vh-bh)/2}px;width:${bw}px;height:${bh}px;`;
+
+  const lbl = document.createElement('div');
+  lbl.className = 'face-label' + (isMatch ? '' : ' unknown');
+  lbl.textContent = isMatch ? result.name : 'UNKNOWN';
+  box.appendChild(lbl);
+  overlay.appendChild(box);
+}
+</script>
 </body>
 </html>
 

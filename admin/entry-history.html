@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -517,6 +517,57 @@
             setTimeout(liveEvent, 3500 + Math.random() * 4000);
         }
         setTimeout(liveEvent, 2000);
+
+        /* ── REAL-TIME RECOGNITION INTEGRATION ── */
+        const FACE_SERVER = 'http://localhost:5002';
+        const recogBC = new BroadcastChannel('gv_recognition');
+
+        // BroadcastChannel — from cctv-feed tab
+        recogBC.onmessage = (evt) => {
+          const msg = evt.data;
+          if (msg.type === 'entry' && msg.matched) {
+            const person = {
+              name:     msg.name     || 'Recognised Student',
+              id:       msg.student_id || 'AI-ID',
+              dept:     msg.dept     || 'Unknown Dept',
+              initials: (msg.name||'??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+              color:    '#22c55e,#15803d',
+            };
+            addRow(person, 'entry', -1);
+            showToast(`✅ AI: ${person.name} entered via ${msg.camera || 'Live Camera'}`, 'info');
+          }
+        };
+
+        // SSE fallback (for when cctv-feed.html is not open)
+        let sseEntrySource = null;
+        function connectEntrySSE() {
+          if (sseEntrySource) return;
+          try {
+            sseEntrySource = new EventSource(`${FACE_SERVER}/events`);
+            sseEntrySource.onmessage = (e) => {
+              try {
+                const data = JSON.parse(e.data);
+                if (data.type === 'recognition' && data.data && data.data.matched) {
+                  const d = data.data;
+                  const person = {
+                    name:     d.name     || 'Recognised Student',
+                    id:       d.student_id || 'AI-ID',
+                    dept:     d.dept     || 'Unknown Dept',
+                    initials: (d.name||'??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+                    color:    '#22c55e,#15803d',
+                  };
+                  addRow(person, 'entry', -1);
+                  showToast(`✅ AI: ${person.name} recognised`, 'info');
+                }
+              } catch(_) {}
+            };
+            sseEntrySource.onerror = () => {
+              sseEntrySource.close(); sseEntrySource = null;
+              setTimeout(connectEntrySSE, 8000);
+            };
+          } catch(e) {}
+        }
+        connectEntrySSE();
     </script>
 </body>
 
