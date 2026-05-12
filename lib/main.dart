@@ -8,7 +8,6 @@ import 'services/db_service.dart';
 import 'services/api_service.dart';
 import 'services/websocket_service.dart';
 import 'router/app_router.dart';
-import 'screens/cctv_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,30 +21,31 @@ Future<void> main() async {
   final auth = AuthService();
   await auth.restoreSession();
 
+  final apiService = ApiService();
+  final wsService  = WebSocketService();
+
+  // Inject token if session was already restored
+  if (auth.token != null) {
+    apiService.setToken(auth.token);
+    wsService.setToken(auth.token!);
+  }
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create: (_) {
-            final t = ThemeNotifier()..setDark(isDark);
-            return t;
-          },
+          create: (_) => ThemeNotifier()..setDark(isDark),
         ),
-
-        ChangeNotifierProvider<AuthService>.value(
-          value: auth,
-        ),
-
+        ChangeNotifierProvider<AuthService>.value(value: auth),
         Provider<ApiService>(
-          create: (_) => ApiService(),
-          dispose: (_, service) => service.dispose(),
+          create: (_) => apiService,
+          dispose: (_, s) => s.dispose(),
         ),
-
         ChangeNotifierProvider<WebSocketService>(
-          create: (_) => WebSocketService(),
+          create: (_) => wsService,
+          dispose: (_, s) => s.dispose(),
         ),
       ],
-
       child: const GeoVisionApp(),
     ),
   );
@@ -66,33 +66,37 @@ class _GeoVisionAppState extends State<GeoVisionApp> {
     super.initState();
 
     final auth = context.read<AuthService>();
-
     _router = buildRouter(auth);
 
     auth.addListener(() {
       _router.refresh();
+
+      final api = context.read<ApiService>();
+      final ws  = context.read<WebSocketService>();
+
+      if (auth.token != null) {
+        api.setToken(auth.token);
+        ws.setToken(auth.token!);
+      } else {
+        api.setToken(null);
+        ws.disconnect();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<ThemeNotifier>();
-    final isDark = theme.isDark;
+    final isDark = context.watch<ThemeNotifier>().isDark;
 
-    SharedPreferences.getInstance().then(
-      (p) => p.setBool('gv_theme_dark', isDark),
-    );
+    SharedPreferences.getInstance()
+        .then((p) => p.setBool('gv_theme_dark', isDark));
 
     return MaterialApp.router(
       title: 'GeoVision Campus Security',
       debugShowCheckedModeBanner: false,
-
-      theme: buildTheme(dark: false),
+      theme:     buildTheme(dark: false),
       darkTheme: buildTheme(dark: true),
-
-      themeMode:
-          isDark ? ThemeMode.dark : ThemeMode.light,
-
+      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       routerConfig: _router,
     );
   }
