@@ -409,22 +409,236 @@
   </main>
 </div>
 
+<style>
+/* ── ALERT PANEL ── */
+.alert-panel{
+  position:fixed;top:0;right:0;bottom:0;width:360px;
+  background:var(--bg-card);border-left:1px solid var(--border-light);
+  z-index:400;transform:translateX(100%);
+  transition:transform .35s cubic-bezier(.4,0,.2,1),background .3s,border-color .3s;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.alert-panel.open{transform:translateX(0);}
+.alert-panel-header{
+  padding:16px 20px;border-bottom:1px solid var(--border-light);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.alert-panel-header h2{font-size:15px;font-weight:800;color:var(--text-primary);}
+.alert-panel-close{width:28px;height:28px;border-radius:50%;background:var(--bg-badge);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  font-size:14px;border:none;color:var(--text-secondary);transition:background .2s;}
+.alert-panel-close:hover{background:var(--clr-danger-ghost);}
+.alert-list{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px;}
+.alert-card{
+  border-radius:var(--radius-md);padding:12px 14px;
+  border:1px solid var(--border-light);background:var(--bg-badge);
+  transition:all .2s;animation:rowIn .25s ease;
+  cursor:pointer;
+}
+.alert-card:hover{border-color:var(--clr-primary);transform:translateX(-2px);}
+.alert-card.sev-low{border-left:3px solid #6366f1;}
+.alert-card.sev-medium{border-left:3px solid #f59e0b;}
+.alert-card.sev-high{border-left:3px solid #dc2626;}
+.alert-card.sev-critical{border-left:3px solid #7c3aed;background:rgba(124,58,237,.07);}
+.alert-card.acknowledged{opacity:.45;}
+.alert-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;}
+.alert-sev-badge{
+  font-size:9px;font-weight:800;padding:2px 8px;border-radius:99px;text-transform:uppercase;letter-spacing:.5px;
+}
+.sev-low .alert-sev-badge{background:rgba(99,102,241,.15);color:#818cf8;}
+.sev-medium .alert-sev-badge{background:rgba(245,158,11,.15);color:#fbbf24;}
+.sev-high .alert-sev-badge{background:rgba(220,38,38,.15);color:#f87171;}
+.sev-critical .alert-sev-badge{background:rgba(124,58,237,.2);color:#c084fc;}
+.alert-type{font-size:12px;font-weight:700;color:var(--text-primary);}
+.alert-detail{font-size:11px;color:var(--text-secondary);margin:3px 0;}
+.alert-meta{font-size:10px;color:var(--text-tertiary);display:flex;gap:8px;flex-wrap:wrap;}
+.alert-snap{width:100%;border-radius:var(--radius-sm);margin-top:8px;max-height:80px;object-fit:cover;display:none;}
+.alert-snap.loaded{display:block;}
+.alert-ack-btn{
+  margin-top:8px;width:100%;padding:5px;font-size:10px;font-weight:700;
+  border-radius:var(--radius-sm);border:1px solid var(--border-light);
+  background:none;color:var(--text-tertiary);cursor:pointer;transition:all .2s;
+}
+.alert-ack-btn:hover{background:var(--clr-success-ghost);color:var(--clr-success);border-color:var(--clr-success);}
+.alert-empty{text-align:center;padding:40px 20px;color:var(--text-tertiary);font-size:13px;}
+.alert-panel-footer{
+  padding:12px 14px;border-top:1px solid var(--border-light);
+  display:flex;gap:8px;flex-shrink:0;
+}
+.alert-footer-btn{
+  flex:1;padding:9px;font-size:11px;font-weight:700;border-radius:var(--radius-sm);
+  border:1px solid var(--border-light);background:none;color:var(--text-secondary);
+  cursor:pointer;transition:all .2s;
+}
+.alert-footer-btn:hover{background:var(--bg-badge);color:var(--text-primary);}
+.alert-toggle-btn{
+  position:fixed;bottom:80px;right:0;z-index:401;
+  background:var(--clr-danger);color:#fff;border:none;
+  border-radius:var(--radius-md) 0 0 var(--radius-md);
+  padding:10px 14px;font-size:12px;font-weight:800;cursor:pointer;
+  box-shadow:var(--shadow-card-hover);transition:all .2s;
+  display:flex;align-items:center;gap:6px;
+}
+.alert-toggle-btn:hover{background:var(--clr-primary-dark);}
+#alert-count-badge{
+  background:#fff;color:var(--clr-danger);border-radius:99px;
+  padding:1px 7px;font-size:10px;font-weight:800;
+}
+</style>
+
+<!-- ── ALERT PANEL (slide-in) ── -->
+<div class="alert-panel" id="alert-panel">
+  <div class="alert-panel-header">
+    <h2>⚠️ Live Alerts <span id="ap-count" style="font-size:12px;font-weight:600;color:var(--text-tertiary);margin-left:6px;"></span></h2>
+    <button class="alert-panel-close" onclick="toggleAlertPanel()">✕</button>
+  </div>
+  <div class="alert-list" id="alert-list">
+    <div class="alert-empty" id="alert-empty">No alerts yet.<br>Start live recognition to monitor.</div>
+  </div>
+  <div class="alert-panel-footer">
+    <button class="alert-footer-btn" onclick="clearAllAlerts()">🗑 Clear All</button>
+    <button class="alert-footer-btn" onclick="exportAlerts()">⬇ Export</button>
+  </div>
+</div>
+
+<!-- Alert panel toggle -->
+<button class="alert-toggle-btn" id="alert-toggle-btn" onclick="toggleAlertPanel()">
+  ⚠️ Alerts <span id="alert-count-badge">0</span>
+</button>
+
 <div class="toast-container" id="toast-container"></div>
 <script src="../css/shell.js"></script>
+<script src="../js/cctvThreat.js"></script>
 <script>
 const FACE_SERVER = 'http://localhost:5002';
 const bc = new BroadcastChannel('gv_recognition');
 
-let liveStream = null;
-let liveMatchCount = 0;
-let liveThreatCount = 0;
-let liveFaceCount = 0;
-let recogRunning = false;
-let recogInterval = null;
+// ── STATE ────────────────────────────────────────────────────────────────────
+let liveStream = null, liveMatchCount = 0, liveThreatCount = 0;
+let recogRunning = false, recogInterval = null;
+let _alertPanelOpen = false;
 
+const CAM_NAME = 'Camera 0 — Live Recognition';
+
+// ── ALERT PANEL ───────────────────────────────────────────────────────────────
+function toggleAlertPanel() {
+  _alertPanelOpen = !_alertPanelOpen;
+  document.getElementById('alert-panel').classList.toggle('open', _alertPanelOpen);
+}
+
+function _renderAlerts() {
+  const alerts = CCTVThreat.getAlerts(80);
+  const list   = document.getElementById('alert-list');
+  const empty  = document.getElementById('alert-empty');
+  const badge  = document.getElementById('alert-count-badge');
+  const apCnt  = document.getElementById('ap-count');
+  const unack  = alerts.filter(a => !a.acknowledged).length;
+
+  badge.textContent = unack;
+  badge.style.background = unack > 0 ? '#fff' : 'rgba(255,255,255,.3)';
+  apCnt.textContent = alerts.length ? `(${alerts.length})` : '';
+  document.getElementById('threat-badge') &&
+    (document.getElementById('threat-badge').textContent = unack);
+
+  if (!alerts.length) { empty.style.display = 'block'; list.innerHTML = ''; list.appendChild(empty); return; }
+  empty.style.display = 'none';
+
+  list.innerHTML = '';
+  alerts.forEach(a => {
+    const card = document.createElement('div');
+    card.className = `alert-card sev-${a.severity}${a.acknowledged ? ' acknowledged' : ''}`;
+    card.dataset.id = a.id;
+    const ts = new Date(a.timestamp).toLocaleTimeString();
+    card.innerHTML = `
+      <div class="alert-card-top">
+        <span class="alert-type">${CCTVThreat.severityIcon(a.severity)} ${a.type}</span>
+        <span class="alert-sev-badge">${a.severity.toUpperCase()}</span>
+      </div>
+      <div class="alert-detail">${a.detail}</div>
+      <div class="alert-meta">
+        <span>📹 ${a.camera}</span>
+        <span>🕐 ${ts}</span>
+        ${a.confidence ? `<span>🎯 ${a.confidence}%</span>` : ''}
+      </div>
+      ${a.snapshot ? `<img class="alert-snap loaded" src="${a.snapshot}" alt="snapshot">` : ''}
+      ${!a.acknowledged ? `<button class="alert-ack-btn" onclick="ackAlert('${a.id}',event)">✓ Acknowledge</button>` : ''}`;
+    list.appendChild(card);
+  });
+}
+
+async function ackAlert(id, e) {
+  e.stopPropagation();
+  CCTVThreat.acknowledgeAlert(id);
+  // Also ack in backend if available
+  try { await fetch(`${FACE_SERVER}/cctv-alert/${id}/acknowledge`, {method:'PATCH'}); } catch(_) {}
+  // Also ack in local DB
+  try { if (typeof GeoVisionDB !== 'undefined') await GeoVisionDB.cctvAlerts.acknowledge(+id); } catch(_) {}
+  _renderAlerts();
+}
+
+function clearAllAlerts() {
+  CCTVThreat.clearAlerts();
+  try { if (typeof GeoVisionDB !== 'undefined') GeoVisionDB.cctvAlerts.clear(); } catch(_) {}
+  _renderAlerts();
+}
+
+function exportAlerts() {
+  const data = JSON.stringify(CCTVThreat.getAlerts(200), null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `cctv_alerts_${Date.now()}.json`;
+  a.click();
+}
+
+// ── REGISTER THREAT LISTENER ─────────────────────────────────────────────────
+CCTVThreat.onAlert(async (alert) => {
+  _renderAlerts();
+  // Show toast for high/critical
+  if (alert.severity === 'high' || alert.severity === 'critical') {
+    typeof showToast === 'function' &&
+      showToast(`${CCTVThreat.severityIcon(alert.severity)} ${alert.severity.toUpperCase()}: ${alert.type} — ${alert.detail}`, 'error');
+  }
+  // Auto-open panel for critical
+  if (alert.severity === 'critical' && !_alertPanelOpen) toggleAlertPanel();
+
+  // Persist to backend (non-blocking)
+  try {
+    await fetch(`${FACE_SERVER}/cctv-alert`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        alert_id: alert.id, type: alert.type, severity: alert.severity,
+        confidence: alert.confidence, detail: alert.detail,
+        camera: alert.camera, zone: alert.zone, timestamp: alert.timestamp,
+        snapshot: alert.snapshot || null,
+      })
+    });
+  } catch(_) {}
+  // Persist to IndexedDB
+  try { if (typeof GeoVisionDB !== 'undefined') await GeoVisionDB.cctvAlerts.add(alert); } catch(_) {}
+
+  // Broadcast to other tabs (e.g. security-threats.html)
+  if (!alert.acknowledged) {
+    bc.postMessage({type:'threat', alertType:alert.type, severity:alert.severity,
+      camera:alert.camera, confidence:alert.confidence, timestamp:alert.timestamp});
+  }
+});
+
+// ── SNAPSHOT HELPER ──────────────────────────────────────────────────────────
+function _captureSnapshot(videoEl, canvasEl) {
+  if (!videoEl.videoWidth) return null;
+  const c = canvasEl;
+  c.width = videoEl.videoWidth; c.height = videoEl.videoHeight;
+  c.getContext('2d').drawImage(videoEl, 0, 0);
+  return c.toDataURL('image/jpeg', 0.65);
+}
+
+// ── START LIVE RECOGNITION ───────────────────────────────────────────────────
 async function startLiveRecognition() {
   try {
-    liveStream = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:720} } });
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720}}
+    });
     const video = document.getElementById('live-video');
     video.srcObject = liveStream;
     video.style.display = 'block';
@@ -434,12 +648,21 @@ async function startLiveRecognition() {
     document.getElementById('live-status-badge').textContent = 'LIVE';
     document.getElementById('live-status-badge').className = 'cam-badge cam-live';
     recogRunning = true;
-    recogInterval = setInterval(runRecognition, 350);
+    // Stagger tick: 700ms to reduce CPU + server load
+    recogInterval = setInterval(runRecognition, 700);
+    _renderAlerts();
   } catch(e) {
-    alert('Camera access denied: ' + e.message);
+    const msg = e.name === 'NotAllowedError' ? 'Camera permission denied.'
+      : e.name === 'NotFoundError' ? 'No camera found.'
+      : 'Camera error: ' + e.message;
+    document.getElementById('recog-bar-name').textContent = '⚠️ ' + msg;
+    document.getElementById('recog-bar').style.display = 'flex';
+    document.getElementById('live-status-badge').textContent = 'ERROR';
+    document.getElementById('live-status-badge').className = 'cam-badge cam-alert';
   }
 }
 
+// ── MAIN RECOGNITION LOOP ────────────────────────────────────────────────────
 async function runRecognition() {
   if (!recogRunning) return;
   const video  = document.getElementById('live-video');
@@ -448,23 +671,18 @@ async function runRecognition() {
 
   canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
-  const b64 = canvas.toDataURL('image/jpeg', 0.7);
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL('image/jpeg', 0.72);
 
   try {
     const resp = await fetch(`${FACE_SERVER}/recognize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frame: b64, camera: 'Camera 0 — Live Recognition' })
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({frame:b64, camera:CAM_NAME})
     });
     if (!resp.ok) return;
     const result = await resp.json();
 
-    // Update face overlay
     updateFaceOverlay(result);
-
-    // Update stats
     document.getElementById('live-stat-faces').textContent = result.face_count || 0;
 
     const now = new Date().toLocaleTimeString();
@@ -472,63 +690,72 @@ async function runRecognition() {
     if (result.matched) {
       liveMatchCount++;
       document.getElementById('live-stat-matches').textContent = liveMatchCount;
-      document.getElementById('recog-bar-name').textContent = `✅ ${result.name} (${result.dept || 'N/A'})`;
+      document.getElementById('recog-bar-name').textContent = `✅ ${result.name} (${result.dept||'N/A'})`;
       document.getElementById('recog-bar-conf').textContent = result.confidence + '%';
       document.getElementById('recog-bar-conf').className = 'recog-bar-conf';
       document.getElementById('live-last-event').textContent = `Last match · ${now}`;
       document.getElementById('live-status-badge').textContent = 'MATCH';
       document.getElementById('live-status-badge').className = 'cam-badge cam-normal';
-
-      // Broadcast entry to other pages
-      bc.postMessage({ type: 'entry', ...result, timestamp: new Date().toISOString() });
+      bc.postMessage({type:'entry', ...result, timestamp:new Date().toISOString()});
+      CCTVThreat.resetFailedStreak();
     } else if (result.face_count > 0) {
       liveThreatCount++;
       document.getElementById('live-stat-threats').textContent = liveThreatCount;
       document.getElementById('recog-bar-name').textContent = '🚫 Unknown face detected';
-      document.getElementById('recog-bar-conf').textContent = (result.confidence || 0) + '% sim.';
+      document.getElementById('recog-bar-conf').textContent = (result.confidence||0)+'% sim.';
       document.getElementById('recog-bar-conf').className = 'recog-bar-conf threat';
-      document.getElementById('live-last-event').textContent = `Threat detected · ${now}`;
+      document.getElementById('live-last-event').textContent = `Threat · ${now}`;
       document.getElementById('live-status-badge').textContent = 'THREAT';
       document.getElementById('live-status-badge').className = 'cam-badge cam-alert';
-
-      // Broadcast threat
-      bc.postMessage({ type: 'threat', camera: 'Camera 0 — Live Recognition', confidence: result.confidence, timestamp: new Date().toISOString() });
     } else {
       document.getElementById('recog-bar-name').textContent = 'Scanning for faces…';
       document.getElementById('recog-bar-conf').textContent = '';
       document.getElementById('live-status-badge').textContent = 'LIVE';
       document.getElementById('live-status-badge').className = 'cam-badge cam-live';
     }
+
+    // ── CCTV THREAT EVALUATION ─────────────────────────────────────────────
+    const snap = (result.face_count > 0 && result.event_type === 'threat')
+      ? _captureSnapshot(video, canvas) : null;
+
+    const threats = CCTVThreat.evaluate(result, {
+      camera: CAM_NAME,
+      zone:   'Main Campus',
+      snapshotUrl: snap,
+    });
+    // _renderAlerts() is called inside the onAlert listener for each threat
+
   } catch(e) {
-    // Server offline — silent fail, don't spam errors
     document.getElementById('recog-bar-name').textContent = '⚠️ Face server offline';
     document.getElementById('recog-bar-conf').textContent = '';
   }
 }
 
+// ── FACE OVERLAY ─────────────────────────────────────────────────────────────
 function updateFaceOverlay(result) {
   const overlay = document.getElementById('face-overlay');
   overlay.innerHTML = '';
   if (!result.face_count) return;
-
-  const feed   = document.getElementById('live-cam-feed');
-  const vw     = feed.offsetWidth;
-  const vh     = feed.offsetHeight;
-
-  // Simple centered face box (real bbox coords come from backend if needed)
+  const feed = document.getElementById('live-cam-feed');
+  const vw = feed.offsetWidth, vh = feed.offsetHeight;
   const isMatch = result.matched;
   const box = document.createElement('div');
   box.className = 'face-box' + (isMatch ? '' : ' unknown');
   const bw = vw * 0.28, bh = vh * 0.6;
   box.style.cssText = `left:${(vw-bw)/2}px;top:${(vh-bh)/2}px;width:${bw}px;height:${bh}px;`;
-
   const lbl = document.createElement('div');
   lbl.className = 'face-label' + (isMatch ? '' : ' unknown');
   lbl.textContent = isMatch ? result.name : 'UNKNOWN';
   box.appendChild(lbl);
+  // Multi-person badge
+  if (result.face_count > 1) {
+    const mp = document.createElement('div');
+    mp.style.cssText = 'position:absolute;top:-32px;left:0;background:#f59e0b;color:#fff;font-size:9px;font-weight:800;padding:2px 7px;border-radius:3px;white-space:nowrap;';
+    mp.textContent = `${result.face_count} PERSONS`;
+    box.appendChild(mp);
+  }
   overlay.appendChild(box);
 }
 </script>
 </body>
 </html>
-

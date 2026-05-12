@@ -91,6 +91,20 @@ def init_db():
             confidence  REAL,
             event_type  TEXT  -- 'entry' | 'threat'
         );
+
+        CREATE TABLE IF NOT EXISTS cctv_alerts (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id      TEXT UNIQUE,
+            type          TEXT NOT NULL,
+            severity      TEXT NOT NULL,
+            confidence    REAL,
+            detail        TEXT,
+            camera        TEXT,
+            zone          TEXT,
+            timestamp     TEXT NOT NULL,
+            snapshot_path TEXT,
+            acknowledged  INTEGER DEFAULT 0
+        );
     """)
     conn.commit()
     conn.close()
@@ -146,6 +160,10 @@ def load_all_embeddings(priority_ids: list[str] = None):
             results.append((u["id"], u["name"], u["dept"] or "", u["student_id"] or "", emb))
     return results
 
+# ─── PATHS: SNAPSHOTS ────────────────────────────────────────────────────────
+SNAPSHOTS_DIR = BASE_DIR / "cctv_snapshots"
+SNAPSHOTS_DIR.mkdir(exist_ok=True)
+
 # ─── MODELS ───────────────────────────────────────────────────────────────────
 class EnrollRequest(BaseModel):
     frames: list[str]          # list of base64 JPEG frames (up to 5)
@@ -157,6 +175,21 @@ class EnrollRequest(BaseModel):
 class RecognizeRequest(BaseModel):
     frame: str                 # base64 JPEG frame
     camera: Optional[str] = "Camera 0 — Live"
+
+class VerifyLoginRequest(BaseModel):
+    frame: str                 # base64 JPEG from student login
+    email: str                 # email of the student attempting login
+
+class CCTVAlertRequest(BaseModel):
+    alert_id:   str
+    type:       str
+    severity:   str            # low | medium | high | critical
+    confidence: Optional[float] = 0.0
+    detail:     Optional[str]  = ""
+    camera:     Optional[str]  = "Camera 0 — Live"
+    zone:       Optional[str]  = "Campus"
+    timestamp:  Optional[str]  = None
+    snapshot:   Optional[str]  = None   # base64 JPEG
 
 class RecognizeResponse(BaseModel):
     matched: bool
@@ -395,6 +428,143 @@ async def sse_events():
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ─── VERIFY LOGIN ─────────────────────────────────────────────────────────
+@app.post("/verify-login")
+async def verify_login(req: VerifyLoginRequest):
+    """
+    Student face-login verification.
+    Uses a higher threshold (0.50) than surveillance recognition.
+    Checks that the face matches the specific enrolled user by email.
+    """
+    try:
+        img = b64_to_cv2(req.frame)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid image: {e}")
+
+    faces = face_app.get(img)
+    if not faces:
+        return {"verified": False, "reason": "no_face", "face_count": 0,
+                "message": "No face detected in the captured frame."}
+
+    if len(faces) > 1:
+        return {"verified": False, "reason": "multiple_faces", "face_count": len(faces),
+                "message": "Multiple faces detected. Please ensure only you are in frame."}
+
+    face      = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+    query_emb = face.normed_embedding
+
+    # Load only this user's embedding
+    conn = get_db()
+    user_row = conn.execute(
+        "SELECT id, name, dept, student_id, embedding_path FROM enrolled_users WHERE email=?",
+        (req.email,)
+    ).fetchone()
+    conn.close()
+
+    if not user_row:
+        return {"verified": False, "reason": "not_enrolled",
+                "message": "No face enrolled for this account. Please enrol first."}
+
+    emb_path = Path(user_row["embedding_path"]) if user_row["embedding_path"] else None
+    if not emb_path or not emb_path.exists():
+        return {"verified": False, "reason": "embedding_missing",
+                "message": "Face data not found. Please re-enrol."}
+
+    stored_emb = np.load(str(emb_path))
+    score      = cosine_similarity(query_emb, stored_emb)
+    LOGIN_THRESHOLD = 0.50  # Stricter than surveillance (0.45)
+
+    if score >= LOGIN_THRESHOLD:
+        conn = get_db()
+        conn.execute("""
+            INSERT INTO recognition_events (user_id, user_name, timestamp, camera, confidence, event_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_row["id"], user_row["name"], datetime.now().isoformat(),
+              "Student Login Portal", round(score * 100, 1), "login"))
+        conn.commit(); conn.close()
+
+        await broadcast_event("login", {
+            "user_id": user_row["id"], "name": user_row["name"],
+            "confidence": round(score * 100, 1),
+            "timestamp": datetime.now().isoformat()
+        })
+
+        return {
+            "verified":   True,
+            "user_id":    user_row["id"],
+            "name":       user_row["name"],
+            "dept":       user_row["dept"] or "",
+            "student_id": user_row["student_id"] or "",
+            "confidence": round(score * 100, 1),
+            "message":    f"Face verified — Welcome, {user_row['name']}!",
+        }
+    else:
+        return {
+            "verified":   False,
+            "reason":     "mismatch",
+            "confidence": round(score * 100, 1),
+            "message":    "Face does not match account. Please try again.",
+        }
+
+
+# ─── CCTV ALERT PERSIST ───────────────────────────────────────────────────
+@app.post("/cctv-alert")
+async def create_cctv_alert(req: CCTVAlertRequest):
+    """Persist a CCTV threat alert, optionally saving the snapshot to disk."""
+    ts = req.timestamp or datetime.now().isoformat()
+
+    snap_path = None
+    if req.snapshot:
+        try:
+            img = b64_to_cv2(req.snapshot)
+            fname = f"{req.alert_id}.jpg"
+            snap_path = str(SNAPSHOTS_DIR / fname)
+            cv2.imwrite(snap_path, img)
+        except Exception:
+            snap_path = None  # non-fatal
+
+    conn = get_db()
+    conn.execute("""
+        INSERT OR IGNORE INTO cctv_alerts
+          (alert_id, type, severity, confidence, detail, camera, zone, timestamp, snapshot_path)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (req.alert_id, req.type, req.severity, req.confidence,
+          req.detail, req.camera, req.zone, ts, snap_path))
+    conn.commit(); conn.close()
+
+    await broadcast_event("cctv_alert", {
+        "id": req.alert_id, "type": req.type, "severity": req.severity,
+        "confidence": req.confidence, "camera": req.camera, "ts": ts
+    })
+    return {"saved": True, "snapshot_saved": snap_path is not None}
+
+
+@app.get("/cctv-alerts")
+async def get_cctv_alerts(limit: int = 50, severity: Optional[str] = None):
+    """Retrieve recent CCTV alerts, optionally filtered by severity."""
+    conn = get_db()
+    if severity:
+        rows = conn.execute(
+            "SELECT * FROM cctv_alerts WHERE severity=? ORDER BY id DESC LIMIT ?",
+            (severity, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM cctv_alerts ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return {"alerts": [dict(r) for r in rows], "count": len(rows)}
+
+
+@app.patch("/cctv-alert/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str):
+    """Mark a CCTV alert as acknowledged."""
+    conn = get_db()
+    conn.execute("UPDATE cctv_alerts SET acknowledged=1 WHERE alert_id=?", (alert_id,))
+    conn.commit(); conn.close()
+    return {"ok": True}
 
 
 if __name__ == "__main__":
