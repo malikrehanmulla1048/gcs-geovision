@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60" fill="none">
+  <!-- GEO text in white -->
+  <text x="0" y="46" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="white" letter-spacing="-2">GEO</text>
+  <!-- VISION text in red -->
+  <text x="112" y="46" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="#dc2626" letter-spacing="-2">VISION</text>
+</svg>

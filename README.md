@@ -1,138 +1,96 @@
-# GeoVision Campus Security Command Centre
+# GeoVision Flutter App
 
-A web-based campus security system with facial recognition for student/staff identification, CCTV monitoring, entry logging, and threat management. 
+A **pixel-perfect Flutter port** of the GeoVision Campus Security Command Centre web app.
 
-Powered by a local, browser-based IndexedDB database, it features full Role-Based Access Control (RBAC) separating Security Administrators from normal Users (Students/Staff) along with a responsive mobile-first UI for students.
-
----
-
-## Architecture Map
+## 📁 Project Structure
 
 ```
-GCS - GeoVision/
-│
-├── index.html                  # LOGIN / APP ROOT
-├── README.md                   # Project documentation
-├── CHANGELOG.md                # Version history
-│
-├── api/
-│   └── db.js                   # IndexedDB Database engine for Users, Logs, and Visitors
-│
-├── css/
-│   ├── shell.css               # Base UI styles, variables, admin shell
-│   └── shell.js                # Core UI interactions for the admin shell
-│
-├── user/
-│   ├── user-shell.css          # Mobile-first design system for Student Portal
-│   ├── profile.html            # Main student dashboard
-│   ├── my-entries.html         # Student entry history
-│   ├── face_capture_system.html# Facial data enrolment
-│   └── signup-details.html     # Visitor details collection
-│
-└── admin/
-    ├── dashboard.html           # Admin site hub
-    ├── visitor-management.html  # Visitor log and Check-in routing
-    ├── cctv-feed.html           # Live CCTV grid
-    ├── entry-history.html       # Global entry history log
-    └── security-threats.html    # Manage and resolve campus threats
+lib/
+├── main.dart                          ← App entry, Provider, Router setup
+├── theme/
+│   └── app_theme.dart                 ← Design tokens (mirrors shell.css :root)
+├── models/
+│   ├── user_model.dart                ← User entity
+│   ├── entry_log.dart                 ← Entry/exit log entity
+│   └── visitor.dart                   ← Campus visitor entity
+├── services/
+│   ├── db_service.dart                ← SQLite DB (mirrors api/db.js IndexedDB)
+│   └── auth_service.dart              ← Session management + auth logic
+├── router/
+│   └── app_router.dart                ← GoRouter with auth-based redirects
+├── widgets/
+│   ├── common_widgets.dart            ← StatCard, SectionCard, Toast, Badge, etc.
+│   └── admin_sidebar.dart             ← Admin sidebar + AdminShell layout
+└── screens/
+    ├── login_screen.dart              ← Login + Register (mirrors index.html)
+    ├── admin/
+    │   ├── dashboard_screen.dart      ← Security Command Centre
+    │   ├── cctv_feed_screen.dart      ← 4×3 CCTV grid + fullscreen modal
+    │   ├── entry_history_screen.dart  ← Live entry log with filters + table
+    │   ├── security_threats_screen.dart ← Threats + pie chart + detail panel
+    │   └── visitor_management_screen.dart ← Visitor table + map tracker
+    └── user/
+        ├── profile_screen.dart        ← User profile + edit bottom sheet
+        ├── my_entries_screen.dart     ← User entry history grouped by date
+        └── face_enrol_screen.dart     ← Animated face capture flow
 ```
 
----
+## 🚀 Getting Started
 
-## 🚀 How to Run the App
+### Prerequisites
+- Flutter SDK ≥ 3.10.0
+- Android Studio or VS Code with Flutter extension
+- A connected Android/iOS device or emulator
 
-This application relies on browser storage (IndexedDB & SessionStorage). For the database API and cross-page integrations to work seamlessly, **the app must be run securely on a local web server**.
-
-### Step 1: Start a Local Server
-Do **not** just double-click the HTML file. Instead, use a local server:
-
-- **Option A (VS Code):** Use the [Live Server Extension](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer). Right-click `index.html` and select **"Open with Live Server"**.
-- **Option B (Node.js):**
-  ```bash
-  npx serve .
-  ```
-- **Option C (Python):**
-  ```bash
-  python -m http.server 8000
-  ```
-
-### Step 2: Open the Application
-Navigate to the local URL (e.g. `http://127.0.0.1:5500/index.html` or `http://localhost:8000/index.html`).
-
-### Step 3: Login Credentials
-The local database gets seeded automatically upon first load. Use the following built-in accounts:
-
-**🛡️ Administrator Login:**
-- **Email:** `admin@reva.edu.in`
-- **Password:** `Admin`
-
-**🎓 Student (User) Login:**
-- **Email:** `student@reva.edu.in`
-- **Password:** `Student`
-
-*(Or you can click the quick-login chips on the sign-in screen to auto-fill these credentials)*
-
----
-
-## User Roles & Flows
-
-### Admin Flow (Command Centre)
-The admin view is heavily inspired by high-end security dashboards. It displays aggregate data, live feeds, and handles campus visitors.
-1. Gain access to the global **Dashboard** layout and metrics.
-2. Monitor **Live CCTV**.
-3. View **Global Entry History** (across all students and staff).
-4. Identify & Resolve **Security Threats**.
-5. Add and track **Visitor Check-ins**, which integrates with the Face Enrolment camera.
-
-### Student Flow (Mobile Portal)
-The user side is a **mobile-first progressive web app style** interface centered around their personal profile.
-1. Students login and are routed directly to the **Profile** dashboard.
-2. They can update profile details, avatar, and check their overall **Face Enrolment status**.
-3. If not enrolled, they route to **Face ID Enrolment** to capture multiple facial angles.
-4. They can monitor their personal **Gate Entries & Exits**.
-
----
-
-## Team Collaboration Guide
-
-This section is for team members to understand how to download, edit, and update the project on GitHub.
-
-### 1. Download (Clone) the Repository
-To get a local copy of the project on your computer, run:
+### Install & Run
 ```bash
-git clone <repository-url>
-cd GCS-GeoVision
+# Get dependencies
+flutter pub get
+
+# Run on Chrome (Recommended for testing)
+flutter run -d chrome
+
+# Or run on an emulator/device
+flutter run
 ```
 
-### 2. Get the Latest Changes (Pull)
-Before start working, always ensure you have the latest updates from your team:
-```bash
-git pull origin main
-```
+### Demo Credentials
+| Role    | Email                   | Password |
+|---------|-------------------------|----------|
+| Admin   | admin@reva.edu.in       | Admin    |
+| Student | student@reva.edu.in     | Student  |
 
-### 3. Make Changes & Edit
-You can now edit the files or any other document. Save your work.
+## ✅ Feature Parity Checklist
 
-### 4. Upload Your Changes (Commit & Push)
-Once you're done editing, follow these steps to upload your changes for the team to see:
+| Web Feature                        | Flutter Implementation                    |
+|------------------------------------|-------------------------------------------|
+| Dark / Light theme toggle          | ✅ ThemeNotifier ChangeNotifier            |
+| Auth login + register              | ✅ LoginScreen with tabs                  |
+| Admin sidebar navigation           | ✅ AdminSidebar + AdminShell              |
+| Dashboard with live feed           | ✅ DashboardScreen with Timer simulation  |
+| CCTV 4×3 grid                      | ✅ GridView + fullscreen Stack overlay    |
+| Entry history live table           | ✅ EntryHistoryScreen + filters           |
+| Threats with pie chart             | ✅ CustomPainter donut + detail panel     |
+| Visitor management + map           | ✅ CustomPainter map + visitor table      |
+| User profile + edit sheet          | ✅ Bottom sheet overlay                   |
+| My entries grouped by date         | ✅ Grouped ListView with filter chips     |
+| Face enrolment flow                | ✅ Step-by-step animated capture          |
+| Persistent session (localStorage)  | ✅ SharedPreferences                      |
+| IndexedDB storage                  | ✅ SharedPreferences (JSON store)          |
+| BroadcastChannel / SSE live events | ✅ Dart Timer simulation                  |
+| Role-based routing (admin/student) | ✅ GoRouter redirect guards               |
 
-**Step A:** Add your changed files:
-```bash
-git add .
-```
+## 🎨 Design Tokens
 
-**Step B:** Label your changes with a clear message:
-```bash
-git commit -m "Brief description of what you changed or added"
-```
+All CSS variables from `shell.css` are mapped 1:1 in `lib/theme/app_theme.dart`:
 
-**Step C:** Upload to GitHub:
-```bash
-git push origin main
-```
-
----
-
-## License
-
-This project is for educational and demonstration purposes.
+| CSS Variable        | Flutter Equivalent           |
+|---------------------|------------------------------|
+| `--clr-primary`     | `GeoColors.primary`          |
+| `--bg-card`         | `theme.bgCard`               |
+| `--bg-body`         | `theme.bgBody`               |
+| `--text-primary`    | `theme.textPrimary`          |
+| `--border-light`    | `theme.border`               |
+| `--clr-danger`      | `GeoColors.danger`           |
+| `--clr-success`     | `GeoColors.success`          |
+| `--radius-lg`       | `GeoRadius.lg` (14.0)        |
