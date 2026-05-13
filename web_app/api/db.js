@@ -10,7 +10,7 @@
 
 const GeoVisionDB = (() => {
   const DB_NAME    = 'geovision_db';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;   // v2: added cctv_alerts store
   let db = null;
 
   // ── OPEN / INIT ──────────────────────────────────────────────
@@ -45,6 +45,17 @@ const GeoVisionDB = (() => {
             keyPath: 'id', autoIncrement: true
           });
           visitors.createIndex('status', 'status', { unique: false });
+        }
+
+        // CCTV ALERTS store (v2)
+        if (!idb.objectStoreNames.contains('cctv_alerts')) {
+          const alerts = idb.createObjectStore('cctv_alerts', {
+            keyPath: 'id', autoIncrement: true
+          });
+          alerts.createIndex('severity',  'severity',  { unique: false });
+          alerts.createIndex('timestamp', 'timestamp', { unique: false });
+          alerts.createIndex('type',      'type',      { unique: false });
+          alerts.createIndex('acknowledged', 'acknowledged', { unique: false });
         }
       };
 
@@ -240,6 +251,38 @@ const GeoVisionDB = (() => {
     }
   };
 
+  // ── CCTV ALERTS ──────────────────────────────────────────────
+  const cctvAlerts = {
+    getAll: (limit = 100) => open().then(() => new Promise((res, rej) => {
+      const store = db.transaction('cctv_alerts', 'readonly').objectStore('cctv_alerts');
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const all = (req.result || []).sort((a, b) => b.id - a.id);
+        res(all.slice(0, limit));
+      };
+      req.onerror = rej;
+    })),
+
+    add: (record) => add('cctv_alerts', {
+      ...record,
+      acknowledged: record.acknowledged ?? false,
+      timestamp: record.timestamp || new Date().toISOString(),
+    }),
+
+    acknowledge: async (id) => {
+      await open();
+      const rec = await getByKey('cctv_alerts', id);
+      if (rec) await put('cctv_alerts', { ...rec, acknowledged: true });
+    },
+
+    getBySeverity: (severity) => getByIndex('cctv_alerts', 'severity', severity),
+
+    clear: () => open().then(() => new Promise((res, rej) => {
+      const req = db.transaction('cctv_alerts', 'readwrite').objectStore('cctv_alerts').clear();
+      req.onsuccess = res; req.onerror = rej;
+    })),
+  };
+
   // ── INIT ─────────────────────────────────────────────────────
   async function init() {
     await open();
@@ -248,7 +291,7 @@ const GeoVisionDB = (() => {
     await visitors.seedSample();
   }
 
-  return { init, authenticate, currentUser, logout, requireAuth, users, entryLogs, visitors };
+  return { init, authenticate, currentUser, logout, requireAuth, users, entryLogs, visitors, cctvAlerts };
 })();
 
 // Auto-init on load

@@ -230,6 +230,116 @@ body::after{
   opacity:.5;
   pointer-events:none;
 }
+
+/* ── FACE LOGIN MODAL ── */
+#face-login-modal{
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.88);backdrop-filter:blur(12px);
+  display:none;align-items:center;justify-content:center;padding:16px;
+}
+#face-login-modal.open{ display:flex; }
+.flm-card{
+  width:100%;max-width:420px;
+  background:rgba(18,18,18,.96);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:20px;overflow:hidden;
+  box-shadow:0 32px 80px rgba(0,0,0,.7);
+  animation:cardIn .4s cubic-bezier(.22,.61,.36,1) both;
+}
+.flm-header{
+  padding:16px 20px;
+  background:rgba(220,38,38,.1);
+  border-bottom:1px solid rgba(220,38,38,.2);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.flm-title{ font-size:15px;font-weight:800;color:#fff; }
+.flm-close{ background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:6px; }
+.flm-close:hover{ background:rgba(255,255,255,.1);color:#fff; }
+
+/* Camera view */
+.flm-cam-wrap{
+  position:relative;background:#000;
+  height:260px;overflow:hidden;
+}
+#flm-video{ width:100%;height:100%;object-fit:cover;display:block; }
+
+/* Face guide oval */
+.flm-guide-wrap{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:140px;height:180px;pointer-events:none;
+}
+.flm-guide{
+  position:absolute;inset:0;border-radius:50%;
+  border:2px dashed rgba(255,255,255,.4);
+  transition:all .4s;
+  animation:rotG 10s linear infinite;
+}
+@keyframes rotG{100%{transform:rotate(360deg)}}
+.flm-guide.ok{border-color:#22c55e;border-style:solid;box-shadow:0 0 18px rgba(34,197,94,.5);}
+.flm-guide.bad{border-color:#dc2626;border-style:solid;box-shadow:0 0 18px rgba(220,38,38,.4);}
+
+/* Corner brackets */
+.flm-corners,.flm-corners2{position:absolute;inset:5%;pointer-events:none;}
+.flm-corners::before,.flm-corners::after,
+.flm-corners2::before,.flm-corners2::after{
+  content:'';position:absolute;width:28px;height:28px;
+  border:3px solid rgba(220,38,38,.7);
+}
+.flm-corners::before{top:0;left:0;border-right:none;border-bottom:none;border-radius:6px 0 0 0;}
+.flm-corners::after{bottom:0;right:0;border-left:none;border-top:none;border-radius:0 0 6px 0;}
+.flm-corners2::before{top:0;right:0;border-left:none;border-bottom:none;border-radius:0 6px 0 0;}
+.flm-corners2::after{bottom:0;left:0;border-right:none;border-top:none;border-radius:0 0 0 6px;}
+
+/* Flash */
+.flm-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .1s;}
+.flm-flash.flash{animation:fflash .35s ease;}
+@keyframes fflash{0%{opacity:.9}100%{opacity:0}}
+
+/* Status strip */
+.flm-status{
+  padding:10px 16px;
+  display:flex;align-items:center;gap:10px;
+  font-size:13px;font-weight:600;
+  border-top:1px solid rgba(255,255,255,.06);
+  min-height:44px;
+  background:rgba(255,255,255,.03);
+  transition:background .3s;
+}
+.flm-status.ok{background:rgba(34,197,94,.1);color:#22c55e;}
+.flm-status.error{background:rgba(220,38,38,.1);color:#f87171;}
+.flm-status.warning{background:rgba(245,158,11,.1);color:#fbbf24;}
+.flm-status.info{background:rgba(255,255,255,.04);color:rgba(255,255,255,.7);}
+
+/* Score bar */
+.flm-score-wrap{padding:0 16px 4px;display:flex;align-items:center;gap:8px;}
+.flm-score-track{flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;}
+.flm-score-fill{height:100%;border-radius:2px;transition:width .3s,background .3s;background:#dc2626;}
+.flm-score-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.4);width:36px;text-align:right;}
+
+/* Bottom bar */
+.flm-footer{padding:14px 16px;display:flex;gap:10px;}
+.flm-btn-login{
+  flex:1;padding:13px;background:#dc2626;border:none;border-radius:10px;
+  color:#fff;font-size:14px;font-weight:800;font-family:'Inter',sans-serif;
+  cursor:pointer;transition:all .2s;
+}
+.flm-btn-login:hover:not(:disabled){background:#b91c1c;transform:translateY(-1px);}
+.flm-btn-login:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+.flm-btn-retake{
+  padding:13px 18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;color:rgba(255,255,255,.7);font-size:13px;font-weight:700;
+  font-family:'Inter',sans-serif;cursor:pointer;transition:all .2s;
+}
+.flm-btn-retake:hover{background:rgba(255,255,255,.14);color:#fff;}
+
+/* Captured preview chip */
+.flm-captured-chip{
+  position:absolute;bottom:8px;right:8px;
+  background:rgba(34,197,94,.85);color:#fff;
+  font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;
+  backdrop-filter:blur(4px);display:none;
+}
+#flm-captured-chip.show{display:block;}
 .auth-btn-loading::before{
   content:'';
   display:inline-block;
@@ -433,7 +543,61 @@ body::after{
   </div>
 </div>
 
+<!-- ── FACE LOGIN MODAL ── -->
+<div id="face-login-modal" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.9);backdrop-filter:blur(14px);display:none;align-items:center;justify-content:center;padding:16px;">
+  <div style="width:100%;max-width:410px;background:rgba(16,16,16,.97);border:1px solid rgba(255,255,255,.1);border-radius:22px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);animation:cardIn .4s cubic-bezier(.22,.61,.36,1) both;">
+    <div style="padding:15px 20px;background:rgba(220,38,38,.1);border-bottom:1px solid rgba(220,38,38,.2);display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-size:14px;font-weight:800;color:#fff;">🔐 Face Verification — Step 2</span>
+      <button onclick="closeFaceModal()" style="background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:6px;">✕</button>
+    </div>
+    <!-- Camera -->
+    <div id="flm-cam-wrap" style="position:relative;background:#000;height:256px;overflow:hidden;">
+      <video id="flm-video" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>
+      <canvas id="flm-canvas" style="display:none;"></canvas>
+      <!-- Guide oval -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:138px;height:178px;pointer-events:none;">
+        <div id="flm-guide" style="position:absolute;inset:0;border-radius:50%;border:2px dashed rgba(255,255,255,.35);transition:all .4s;animation:rotG 10s linear infinite;"></div>
+      </div>
+      <!-- Corners -->
+      <div style="position:absolute;inset:5%;pointer-events:none;">
+        <div style="position:absolute;top:0;left:0;width:26px;height:26px;border-top:3px solid rgba(220,38,38,.7);border-left:3px solid rgba(220,38,38,.7);border-radius:5px 0 0 0;"></div>
+        <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;border-bottom:3px solid rgba(220,38,38,.7);border-right:3px solid rgba(220,38,38,.7);border-radius:0 0 5px 0;"></div>
+        <div style="position:absolute;top:0;right:0;width:26px;height:26px;border-top:3px solid rgba(220,38,38,.7);border-right:3px solid rgba(220,38,38,.7);border-radius:0 5px 0 0;"></div>
+        <div style="position:absolute;bottom:0;left:0;width:26px;height:26px;border-bottom:3px solid rgba(220,38,38,.7);border-left:3px solid rgba(220,38,38,.7);border-radius:0 0 0 5px;"></div>
+      </div>
+      <!-- Flash -->
+      <div id="flm-flash" style="position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;"></div>
+      <!-- Capture chip -->
+      <div id="flm-chip" style="position:absolute;bottom:8px;right:8px;background:rgba(34,197,94,.85);color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;display:none;">✓ Captured</div>
+      <!-- Start overlay -->
+      <div id="flm-overlay" style="position:absolute;inset:0;background:rgba(0,0,0,.78);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;">
+        <div style="font-size:44px;">📷</div>
+        <div style="color:#fff;font-size:14px;font-weight:700;">Camera Required</div>
+        <div style="color:rgba(255,255,255,.55);font-size:11px;text-align:center;max-width:230px;">Allow camera to verify your identity</div>
+        <button onclick="startFaceModal()" id="flm-start-btn" style="padding:9px 22px;background:#dc2626;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;">▶ Start Camera</button>
+        <div id="flm-cam-err" style="color:#f87171;font-size:11px;text-align:center;max-width:250px;display:none;"></div>
+      </div>
+    </div>
+    <!-- Score bar -->
+    <div id="flm-score-wrap" style="display:none;padding:8px 16px 2px;display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;"><div id="flm-score-fill" style="height:100%;border-radius:2px;width:0%;background:#dc2626;transition:width .3s,background .3s;"></div></div>
+      <span id="flm-score-lbl" style="font-size:10px;font-weight:700;color:rgba(255,255,255,.4);width:34px;text-align:right;">0%</span>
+    </div>
+    <!-- Status -->
+    <div id="flm-status" style="padding:10px 16px;display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;min-height:44px;background:rgba(255,255,255,.03);border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.65);">
+      <span id="flm-si">📷</span><span id="flm-st">Start camera to verify your face.</span>
+    </div>
+    <!-- Footer -->
+    <div style="padding:13px 16px;display:flex;gap:10px;">
+      <button id="flm-retake" onclick="retakeFace()" style="display:none;padding:12px 16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:10px;color:rgba(255,255,255,.7);font-size:13px;font-weight:700;cursor:pointer;">↺ Retake</button>
+      <button id="flm-verify" onclick="submitFaceLogin()" disabled style="flex:1;padding:12px;background:#dc2626;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;opacity:.4;">Verify &amp; Login →</button>
+    </div>
+  </div>
+</div>
+
+<style>@keyframes rotG{100%{transform:rotate(360deg)}}</style>
 <script src="api/db.js"></script>
+<script src="js/faceQuality.js"></script>
 <script>
 /* ── TAB SWITCH ───────────────────────────────── */
 function switchTab(tab) {
@@ -473,30 +637,185 @@ function fillStudent() {
   document.getElementById('login-password').value = 'Student';
 }
 
-/* ── LOGIN ────────────────────────────────────── */
+/* ── LOGIN (step 1: credentials) ── */
 async function doLogin() {
   clearError('login-error');
   const email    = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
-
-  if (!email || !password) { showError('login-error', 'Please enter your email and password.'); return; }
-
+  if (!email || !password) { showError('login-error','Please enter your email and password.'); return; }
   setLoading('btn-login', true);
   try {
     const result = await GeoVisionDB.authenticate(email, password);
     if (!result.ok) { showError('login-error', result.error); return; }
-    // Route by role
     if (result.user.role === 'admin') {
       window.location.href = 'admin/dashboard.html';
     } else {
-      window.location.href = 'user/profile.html';
+      // Student → open face-verification step
+      _flmEmail = email;
+      openFaceModal();
     }
-  } catch (e) {
-    showError('login-error', 'Login failed. Please try again.');
-    console.error(e);
+  } catch(e) {
+    showError('login-error','Login failed. Please try again.');
   } finally {
     setLoading('btn-login', false);
   }
+}
+
+/* ── FACE LOGIN STATE ── */
+const FACE_SERVER = 'http://localhost:5002';
+let _flmStream = null, _flmTimer = null, _flmEmail = '';
+let _flmCaptured = null, _flmBuffer = [], _flmGrabbed = false;
+
+function openFaceModal() {
+  _flmCaptured = null; _flmBuffer = []; _flmGrabbed = false;
+  document.getElementById('face-login-modal').style.display = 'flex';
+  document.getElementById('flm-verify').disabled = true;
+  document.getElementById('flm-verify').style.opacity = '.4';
+  document.getElementById('flm-retake').style.display = 'none';
+  document.getElementById('flm-chip').style.display = 'none';
+  document.getElementById('flm-score-wrap').style.display = 'none';
+  document.getElementById('flm-overlay').style.display = 'flex';
+  document.getElementById('flm-guide').style.borderColor = 'rgba(255,255,255,.35)';
+  document.getElementById('flm-guide').style.borderStyle = 'dashed';
+  document.getElementById('flm-guide').style.boxShadow = 'none';
+  _flmSetStatus('rgba(255,255,255,.65)','📷','Start camera to verify your face.');
+}
+
+function closeFaceModal() {
+  _flmStop();
+  document.getElementById('face-login-modal').style.display = 'none';
+}
+
+async function startFaceModal() {
+  document.getElementById('flm-start-btn').textContent = 'Starting…';
+  document.getElementById('flm-cam-err').style.display = 'none';
+  try {
+    _flmStream = await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}
+    });
+    const v = document.getElementById('flm-video');
+    v.srcObject = _flmStream; await v.play();
+    document.getElementById('flm-overlay').style.display = 'none';
+    document.getElementById('flm-score-wrap').style.display = 'flex';
+    _flmSetStatus('rgba(255,255,255,.65)','🔍','Position your face in the oval…');
+    _flmTimer = setInterval(_flmTick, 400);
+  } catch(err) {
+    const e = document.getElementById('flm-cam-err'); e.style.display = 'block';
+    e.textContent = err.name === 'NotAllowedError' ? 'Camera permission denied. Allow in browser settings.'
+      : err.name === 'NotFoundError' ? 'No camera found on this device.'
+      : 'Camera error: ' + err.message;
+    document.getElementById('flm-start-btn').textContent = '▶ Start Camera';
+  }
+}
+
+function _flmTick() {
+  const v = document.getElementById('flm-video');
+  if (!v.videoWidth) return;
+  const c = document.getElementById('flm-canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);
+  const q = FaceQuality.evaluate(v, null);
+  // Score bar
+  const pct = q.score;
+  const fill = document.getElementById('flm-score-fill');
+  fill.style.width = pct+'%';
+  fill.style.background = pct>=65?'#22c55e':pct>=40?'#f59e0b':'#dc2626';
+  document.getElementById('flm-score-lbl').textContent = pct+'%';
+  // Guide
+  const guide = document.getElementById('flm-guide');
+  if (!_flmCaptured) {
+    if (q.ready) {
+      guide.style.borderColor='#22c55e'; guide.style.borderStyle='solid';
+      guide.style.boxShadow='0 0 18px rgba(34,197,94,.5)';
+    } else {
+      guide.style.borderColor='#dc2626'; guide.style.borderStyle='solid';
+      guide.style.boxShadow='0 0 14px rgba(220,38,38,.35)';
+    }
+    _flmSetStatus(q.level==='ok'?'#22c55e':q.level==='error'?'#f87171':'#fbbf24', q.icon, q.message);
+  }
+  // Buffer
+  if (q.ready && !_flmGrabbed) {
+    _flmBuffer.push({dataUrl:c.toDataURL('image/jpeg',.88), score:q.score});
+    if (_flmBuffer.length>10) _flmBuffer.shift();
+    if (_flmBuffer.length>=3) { _flmGrabbed=true; _flmAutoCapture(); }
+  }
+}
+
+function _flmAutoCapture() {
+  const best = FaceQuality.pickBestFrame(_flmBuffer);
+  if (!best) return;
+  _flmCaptured = best.dataUrl;
+  const fl = document.getElementById('flm-flash');
+  fl.style.opacity='1'; setTimeout(()=>fl.style.opacity='0',350);
+  document.getElementById('flm-guide').style.borderColor='#22c55e';
+  document.getElementById('flm-chip').style.display='block';
+  document.getElementById('flm-retake').style.display='block';
+  const vb = document.getElementById('flm-verify');
+  vb.disabled=false; vb.style.opacity='1';
+  _flmSetStatus('#22c55e','✅','Face captured! Click "Verify & Login" to proceed.');
+  FaceQuality.log('captured',{email:_flmEmail,score:best.score});
+}
+
+function retakeFace() {
+  _flmCaptured=null; _flmBuffer=[]; _flmGrabbed=false;
+  document.getElementById('flm-chip').style.display='none';
+  document.getElementById('flm-retake').style.display='none';
+  const vb = document.getElementById('flm-verify');
+  vb.disabled=true; vb.style.opacity='.4';
+  document.getElementById('flm-guide').style.borderColor='rgba(255,255,255,.35)';
+  document.getElementById('flm-guide').style.borderStyle='dashed';
+  _flmSetStatus('rgba(255,255,255,.65)','🔍','Position your face in the oval…');
+  FaceQuality.log('retake',{email:_flmEmail});
+}
+
+async function submitFaceLogin() {
+  if (!_flmCaptured) return;
+  const vb = document.getElementById('flm-verify');
+  vb.disabled=true; vb.textContent='Verifying…';
+  _flmSetStatus('rgba(255,255,255,.65)','⏳','Verifying face against your account…');
+  try {
+    const r = await fetch(`${FACE_SERVER}/verify-login`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({frame:_flmCaptured, email:_flmEmail})
+    });
+    if (!r.ok) throw new Error('Server '+r.status);
+    const res = await r.json();
+    if (res.verified) {
+      _flmStop();
+      _flmSetStatus('#22c55e','✅', res.message||'Face verified!');
+      FaceQuality.log('login_success',{email:_flmEmail,conf:res.confidence});
+      setTimeout(()=>{ window.location.href='user/profile.html'; },700);
+    } else {
+      let msg = res.message||'Face verification failed.';
+      _flmSetStatus('#f87171','❌',msg);
+      vb.textContent='Verify & Login →'; vb.disabled=false; vb.style.opacity='1';
+      document.getElementById('flm-retake').style.display='block';
+      FaceQuality.log('login_failed',{email:_flmEmail,reason:res.reason});
+      if (res.reason==='not_enrolled'||res.reason==='embedding_missing') {
+        setTimeout(()=>{
+          if(confirm('No face enrolled. Proceed with password-only login?')){
+            _flmStop(); document.getElementById('face-login-modal').style.display='none';
+            window.location.href='user/profile.html';
+          }
+        },1400);
+      }
+    }
+  } catch(err) {
+    _flmSetStatus('#fbbf24','⚠️','Face server offline — proceeding with password login.');
+    FaceQuality.log('server_offline',{email:_flmEmail});
+    _flmStop();
+    setTimeout(()=>{ window.location.href='user/profile.html'; },1200);
+  }
+}
+
+function _flmStop() {
+  if (_flmTimer){clearInterval(_flmTimer);_flmTimer=null;}
+  if (_flmStream){_flmStream.getTracks().forEach(t=>t.stop());_flmStream=null;}
+}
+function _flmSetStatus(color,icon,text){
+  document.getElementById('flm-status').style.color=color;
+  document.getElementById('flm-si').textContent=icon;
+  document.getElementById('flm-st').textContent=text;
 }
 
 /* ── REGISTER ─────────────────────────────────── */
