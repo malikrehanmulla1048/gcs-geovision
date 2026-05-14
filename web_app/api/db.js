@@ -169,11 +169,14 @@ const GeoVisionDB = (() => {
 
   function requireAuth(role) {
     const u = currentUser();
-    if (!u) { window.location.href = '/index.html'; return null; }
+    // Compute depth-relative path back to root
+    const depth = window.location.pathname.replace(/\/[^\/]*$/, '').split('/').filter(Boolean).length;
+    const prefix = depth > 0 ? '../'.repeat(depth) : '';
+    if (!u) { window.location.href = prefix + 'index.html'; return null; }
     if (role && u.role !== role) {
       window.location.href = u.role === 'admin'
-        ? '/admin/dashboard.html'
-        : '/user/profile.html';
+        ? prefix + 'admin/dashboard.html'
+        : prefix + 'user/profile.html';
       return null;
     }
     return u;

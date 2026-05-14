@@ -200,6 +200,7 @@ class RecognizeResponse(BaseModel):
     confidence: Optional[float] = None
     face_count: int = 0
     event_type: Optional[str] = None  # 'entry' | 'threat' | None
+    bbox: Optional[list] = None       # [x1_norm, y1_norm, x2_norm, y2_norm] 0-1 range
 
 # ─── ROUTES ───────────────────────────────────────────────────────────────────
 
@@ -297,6 +298,15 @@ async def recognize(req: RecognizeRequest):
     face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
     query_emb = face.normed_embedding
 
+    # Normalize bbox to 0-1 range
+    h, w = img.shape[0], img.shape[1]
+    bbox_norm = [
+        round(float(face.bbox[0]) / w, 4),
+        round(float(face.bbox[1]) / h, 4),
+        round(float(face.bbox[2]) / w, 4),
+        round(float(face.bbox[3]) / h, 4),
+    ]
+
     # Geofencing prioritization
     priority_ids  = get_geofenced_ids()
     enrolled      = load_all_embeddings(priority_ids=priority_ids)
@@ -345,7 +355,8 @@ async def recognize(req: RecognizeRequest):
         return RecognizeResponse(
             matched=True, user_id=uid, name=name, dept=dept, student_id=student_id,
             confidence=round(best_score * 100, 1),
-            face_count=face_count, event_type=event_type
+            face_count=face_count, event_type=event_type,
+            bbox=bbox_norm
         )
     else:
         event_type = "threat"
@@ -370,7 +381,8 @@ async def recognize(req: RecognizeRequest):
             matched=False,
             confidence=round(best_score * 100, 1),
             face_count=face_count,
-            event_type=event_type
+            event_type=event_type,
+            bbox=bbox_norm
         )
 
 
