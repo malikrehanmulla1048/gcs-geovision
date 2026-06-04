@@ -1,6 +1,4 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../screens/login_screen.dart';
 import '../screens/admin/dashboard_screen.dart';
@@ -18,20 +16,25 @@ GoRouter buildRouter(AuthService auth) => GoRouter(
     final loggedIn = auth.isLoggedIn;
     final loc      = state.uri.path;
 
-    // Not logged in → redirect to login for any protected route
     if (!loggedIn && loc != '/') return '/';
 
-    // Logged in admin trying to hit / → send to dashboard
-    if (loggedIn && auth.isAdmin && loc == '/') return '/admin/dashboard';
+    if (loggedIn) {
+      // Redirect to dashboard / profile if on root
+      if (loc == '/') {
+        return auth.isAdmin ? '/admin/dashboard' : '/user/profile';
+      }
 
-    // Logged in student trying to hit / → send to profile
-    if (loggedIn && !auth.isAdmin && loc == '/') return '/user/profile';
+      // Students who haven't enrolled face yet → go to enrolment first
+      if (!auth.isAdmin && !auth.isFaceEnrolled && loc != '/user/face-enrol') {
+        return '/user/face-enrol?mode=register';
+      }
 
-    // Student trying to access admin route
-    if (loggedIn && !auth.isAdmin && loc.startsWith('/admin')) return '/user/profile';
+      // Prevent students from accessing admin routes
+      if (!auth.isAdmin && loc.startsWith('/admin')) return '/user/profile';
 
-    // Admin trying to access user route
-    if (loggedIn && auth.isAdmin && loc.startsWith('/user')) return '/admin/dashboard';
+      // Prevent admins from accessing user routes
+      if (auth.isAdmin && loc.startsWith('/user')) return '/admin/dashboard';
+    }
 
     return null;
   },

@@ -3,8 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/auth_service.dart';
-import '../../services/db_service.dart';
-import '../../models/entry_log.dart';
 import '../../widgets/common_widgets.dart';
 import 'profile_screen.dart';
 
@@ -15,51 +13,32 @@ class MyEntriesScreen extends StatefulWidget {
 }
 
 class _MyEntriesScreenState extends State<MyEntriesScreen> {
-  final _db = DbService();
-  List<EntryLog> _all = [];
+  List<dynamic> _all = [];
   String _filter = 'all';
   bool _loading  = true;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    final auth = context.read<AuthService>();
-    final user = auth.currentUser;
-    if (user == null) return;
+    final auth  = context.read<AuthService>();
+    final email = auth.userEmail;
+    if (email == null) return;
     try {
-      final userLogs = await _db.getEntryLogsByUser(user.email);
-      final allLogs  = await _db.getAllEntryLogs();
-      final display  = userLogs.isNotEmpty ? userLogs : allLogs;
-      display.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      if (mounted) setState(() { _all = display; _loading = false; });
-    } catch (e) {
+      final logs = await auth.backend.getUserEntryLogs(email);
+      if (mounted) setState(() { _all = logs; _loading = false; });
+    } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  List<EntryLog> get _filtered => _filter == 'all' ? _all
-      : _filter == 'exit'
-          ? _all.where((e) => e.type == 'exit').toList()
-          : _all.where((e) => e.type != 'exit').toList();
-
-  int get _entries => _all.where((e) => e.type != 'exit').length;
-  int get _exits   => _all.where((e) => e.type == 'exit').length;
-
-  String _month(int m) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return months[m - 1];
+  List<dynamic> get _filtered {
+    if (_filter == 'all') return _all;
+    return _all.where((e) => (e['type'] as String?) == _filter).toList();
   }
 
-  String _dayLabel(DateTime d) {
-    const days   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const months = ['January','February','March','April','May','June',
-                    'July','August','September','October','November','December'];
-    return '${days[d.weekday % 7]}, ${d.day} ${months[d.month - 1]}';
-  }
+  int get _entries => _all.where((e) => e['type'] == 'entry').length;
+  int get _exits   => _all.where((e) => e['type'] == 'exit').length;
 
   @override
   Widget build(BuildContext context) {
@@ -67,9 +46,15 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
     final filtered = _filtered;
 
     // Group by date
-    final Map<String, List<EntryLog>> groups = {};
+    final Map<String, List<dynamic>> groups = {};
     for (final e in filtered) {
-      final key = _dayLabel(e.timestamp);
+      final ts  = e['timestamp'] as String? ?? '';
+      final key = ts.isNotEmpty
+          ? () { final d = DateTime.parse(ts).toLocal();
+              const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+              const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+              return '${days[d.weekday % 7]}, ${d.day} ${months[d.month-1]}'; }()
+          : 'Unknown Date';
       groups.putIfAbsent(key, () => []).add(e);
     }
 
@@ -78,15 +63,14 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Title
-          Text('🚪 Entry History', style: GoogleFonts.inter(
+          Text('Entry History', style: GoogleFonts.inter(
             fontSize: 20, fontWeight: FontWeight.w800, color: theme.textPrimary)),
           const SizedBox(height: 3),
           Text('Your campus gate entries and exits', style: GoogleFonts.inter(
             fontSize: 13, color: theme.textTertiary)),
           const SizedBox(height: 16),
 
-          // Stats chips
+          // Stats
           Row(children: [
             _statChip(theme, '${_all.length}', 'Total'),
             const SizedBox(width: 12),
@@ -106,26 +90,19 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
           ]),
           const SizedBox(height: 16),
 
-          // Content
           if (_loading)
-            Center(child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(children: [
-                const Text('⏳', style: TextStyle(fontSize: 32)),
-                const SizedBox(height: 8),
-                Text('Loading your entries…', style: GoogleFonts.inter(
-                  fontSize: 13, fontWeight: FontWeight.w600, color: theme.textTertiary)),
-              ]),
-            ))
+            const Center(child: Padding(
+              padding: EdgeInsets.all(40),
+              child: CircularProgressIndicator(color: GeoColors.primary)))
           else if (filtered.isEmpty)
             Container(
               padding: const EdgeInsets.all(40),
               decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
                 borderRadius: BorderRadius.circular(GeoRadius.lg)),
               child: Center(child: Column(children: [
-                const Text('📭', style: TextStyle(fontSize: 32)),
-                const SizedBox(height: 8),
-                Text('No entries found for this filter.', style: GoogleFonts.inter(
+                Icon(Icons.history_outlined, size: 40, color: theme.textTertiary),
+                const SizedBox(height: 12),
+                Text('No entries found.', style: GoogleFonts.inter(
                   fontSize: 13, fontWeight: FontWeight.w600, color: theme.textTertiary)),
               ])))
           else
@@ -140,9 +117,8 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
                       padding: const EdgeInsets.fromLTRB(0, 14, 0, 6),
                       child: Text(group.key.toUpperCase(), style: GoogleFonts.inter(
                         fontSize: 11, fontWeight: FontWeight.w700,
-                        color: theme.textTertiary, letterSpacing: .5)),
-                    ),
-                    ...group.value.map((e) => _entryItem(theme, e)),
+                        color: theme.textTertiary, letterSpacing: .5))),
+                    ...group.value.map((e) => _entryItem(theme, e as Map<String, dynamic>)),
                   ],
                   const SizedBox(height: 8),
                 ]),
@@ -154,12 +130,19 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
     );
   }
 
-  Widget _entryItem(ThemeNotifier theme, EntryLog e) {
-    final isEntry  = e.type != 'exit';
+  Widget _entryItem(ThemeNotifier theme, Map<String, dynamic> e) {
+    final type    = e['type']  as String? ?? 'entry';
+    final gate    = e['gate']  as String? ?? 'Gate';
+    final ts      = e['timestamp'] as String? ?? '';
+    final conf    = (e['confidence'] as num?)?.toDouble();
+    final isEntry = type == 'entry';
     final dotColor = isEntry ? GeoColors.success : const Color(0xFF6366F1);
-    final typeLabel = isEntry ? '→ Entry' : '← Exit';
-    final time = '${e.timestamp.hour.toString().padLeft(2,"0")}:${e.timestamp.minute.toString().padLeft(2,"0")}';
-    final conf = e.confidence != null ? ' · ${e.confidence!.toStringAsFixed(1)}%' : '';
+    final label   = isEntry ? 'Entry' : type == 'exit' ? 'Exit' : 'Denied';
+    final time    = ts.isNotEmpty
+        ? () { final d = DateTime.parse(ts).toLocal();
+            return '${d.hour.toString().padLeft(2,"0")}:${d.minute.toString().padLeft(2,"0")}'; }()
+        : '--:--';
+    final confStr = conf != null ? ' · ${conf.toStringAsFixed(1)}%' : '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -167,17 +150,15 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
         Container(width: 10, height: 10, margin: const EdgeInsets.only(right: 12),
           decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('📍 ${e.gate}', style: GoogleFonts.inter(
+          Text(gate, style: GoogleFonts.inter(
             fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary)),
-          Text('$time$conf', style: GoogleFonts.inter(
-            fontSize: 11, color: theme.textTertiary)),
+          Text('$time$confStr', style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-          decoration: BoxDecoration(
-            color: dotColor.withOpacity(.1),
+          decoration: BoxDecoration(color: dotColor.withOpacity(.1),
             borderRadius: BorderRadius.circular(GeoRadius.full)),
-          child: Text(typeLabel, style: GoogleFonts.inter(
+          child: Text(label, style: GoogleFonts.inter(
             fontSize: 11, fontWeight: FontWeight.w600, color: dotColor))),
       ]),
     );
@@ -202,8 +183,7 @@ class _MyEntriesScreenState extends State<MyEntriesScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           color: active ? GeoColors.primary.withOpacity(.12) : theme.bgCard,
-          border: Border.all(
-            color: active ? GeoColors.primary.withOpacity(.25) : theme.border),
+          border: Border.all(color: active ? GeoColors.primary.withOpacity(.25) : theme.border),
           borderRadius: BorderRadius.circular(GeoRadius.full)),
         child: Text(label, style: GoogleFonts.inter(
           fontSize: 12, fontWeight: FontWeight.w600,

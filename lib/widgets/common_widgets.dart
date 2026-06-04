@@ -136,7 +136,8 @@ class SectionCard extends StatelessWidget {
 
 // ── STAT CARD ─────────────────────────────────────────────────────────
 class StatCard extends StatelessWidget {
-  final String icon;
+  final String icon;        // single letter label e.g. '→', 'A', '#'
+  final IconData? iconData; // optional Material icon (takes priority)
   final String value;
   final String label;
   final String? trend;
@@ -147,7 +148,8 @@ class StatCard extends StatelessWidget {
 
   const StatCard({
     super.key,
-    required this.icon,
+    this.icon = '',
+    this.iconData,
     required this.value,
     required this.label,
     required this.theme,
@@ -168,12 +170,16 @@ class StatCard extends StatelessWidget {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Container(
-          width: 26, height: 26,
+          width: 30, height: 30,
           decoration: BoxDecoration(
             color: iconBg ?? theme.bgBadge,
             borderRadius: BorderRadius.circular(GeoRadius.sm),
           ),
-          child: Center(child: Text(icon, style: const TextStyle(fontSize: 13))),
+          child: Center(child: iconData != null
+              ? Icon(iconData, size: 16, color: iconColor ?? theme.textSecondary)
+              : Text(icon, style: GoogleFonts.inter(
+                  fontSize: 13, fontWeight: FontWeight.w700,
+                  color: iconColor ?? theme.textSecondary))),
         ),
         if (trend != null)
           Container(

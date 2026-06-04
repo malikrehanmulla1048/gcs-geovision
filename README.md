@@ -54,11 +54,11 @@ flutter run -d chrome
 flutter run
 ```
 
-### Demo Credentials
-| Role    | Email                   | Password |
-|---------|-------------------------|----------|
-| Admin   | admin@reva.edu.in       | Admin    |
-| Student | student@reva.edu.in     | Student  |
+### Demo Credentials (SQLite Seed)
+| Role    | Email                   | Password            |
+|---------|-------------------------|---------------------|
+| Admin   | admin@reva.edu.in       | Admin@GeoVision2025 |
+| Student | Register a new account via the login screen |
 
 ## ✅ Feature Parity Checklist
 
@@ -69,9 +69,9 @@ flutter run
 | Admin sidebar navigation           | ✅ AdminSidebar + AdminShell              |
 | Dashboard with live feed           | ✅ DashboardScreen with Timer simulation  |
 | CCTV 4×3 grid                      | ✅ GridView + fullscreen Stack overlay    |
-| Entry history live table           | ✅ EntryHistoryScreen + filters           |
-| Threats with pie chart             | ✅ CustomPainter donut + detail panel     |
-| Visitor management + map           | ✅ CustomPainter map + visitor table      |
+| Entry history live table           | ✅ EntryHistoryScreen + real API filters  |
+| Threats with pie chart             | ✅ Live from backend + detail panel       |
+| Visitor management + map           | ✅ Real check-in/checkout + visitor table |
 | User profile + edit sheet          | ✅ Bottom sheet overlay                   |
 | My entries grouped by date         | ✅ Grouped ListView with filter chips     |
 | Face enrolment flow                | ✅ Step-by-step animated capture          |

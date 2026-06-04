@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
-import '../../services/db_service.dart';
-import '../../models/entry_log.dart';
+import '../../services/auth_service.dart';
+import '../../services/backend_service.dart';
 import '../../widgets/admin_sidebar.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -16,587 +15,508 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  final _db  = DbService();
-  final _rng = Random();
-  Timer? _feedTimer;
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late final BackendService _backend;
+  Timer? _refreshTimer;
   Timer? _clockTimer;
+  DateTime _now = DateTime.now();
 
-  int _entryCount = 247;
-  DateTime _now   = DateTime.now();
+  // Data
+  Map<String, dynamic> _stats    = {};
+  Map<String, dynamic> _health   = {};
+  List<dynamic>        _threats  = [];
+  List<dynamic>        _recentLogs = [];
+  List<dynamic>        _onCampus   = [];
+  bool _loading = true;
 
-  // Live feed items (last 6)
-  final List<_FeedItem> _feed      = [];
-  final List<_ScanItem> _scans     = [];
-  final List<double>    _confValues = [];
-  double _avgConf = 96.3;
-
-  static const _gates = DbService.gates;
-  static const _people = DbService.people;
+  late TabController _tabCtrl;
 
   @override
   void initState() {
     super.initState();
-    _seedFeed();
-    _startLiveSim();
-    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _backend = context.read<AuthService>().backend;
+    _loadAll();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _loadAll());
+    _clockTimer   = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
   }
 
   @override
   void dispose() {
-    _feedTimer?.cancel();
+    _tabCtrl.dispose();
+    _refreshTimer?.cancel();
     _clockTimer?.cancel();
     super.dispose();
   }
 
-  void _seedFeed() {
-    final seeds = [
-      ('entry', 0), ('entry', 1), ('entry', 2), ('exit', 3), ('entry', 4),
-    ];
-    for (final (type, idx) in seeds.reversed) {
-      _addToFeed(type, idx);
-    }
-  }
-
-  void _startLiveSim() {
-    final delay = 4000 + _rng.nextInt(3000);
-    _feedTimer = Timer(Duration(milliseconds: delay), () {
+  Future<void> _loadAll() async {
+    try {
+      final results = await Future.wait([
+        _backend.getStats(),
+        _backend.getHealth(),
+        _backend.getThreats(status: 'active'),
+        _backend.getEntryLogs(limit: 8),
+        _backend.getOnCampus(),
+      ]);
       if (!mounted) return;
-      _simulateLiveEvent();
-      _startLiveSim();
-    });
-  }
-
-  void _simulateLiveEvent() {
-    final idx  = _rng.nextInt(_people.length);
-    final r    = _rng.nextDouble();
-    String type;
-    if (r < .65)      type = 'entry';
-    else if (r < .9)  type = 'exit';
-    else               type = 'denied';
-
-    setState(() {
-      _addToFeed(type, idx);
-      if (type == 'entry') _entryCount++;
-    });
-  }
-
-  void _addToFeed(String type, int personIdx) {
-    final p    = _people[personIdx % _people.length];
-    final conf = type == 'denied'
-        ? 55 + _rng.nextDouble() * 25
-        : 85 + _rng.nextDouble() * 14.9;
-
-    _confValues.add(conf);
-    if (_confValues.length > 20) _confValues.removeAt(0);
-    _avgConf = _confValues.reduce((a, b) => a + b) / _confValues.length;
-
-    _feed.insert(0, _FeedItem(
-      name:     p['name']!,
-      id:       p['id']!,
-      initials: p['initials']!,
-      colors:   p['color']!.split(','),
-      gate:     _gates[_rng.nextInt(_gates.length)],
-      time:     DateTime.now(),
-      conf:     conf,
-      type:     type,
-    ));
-    if (_feed.length > 6) _feed.removeLast();
-
-    _scans.insert(0, _ScanItem(
-      name:     p['name']!,
-      initials: p['initials']!,
-      colors:   p['color']!.split(','),
-      gate:     _gates[_rng.nextInt(_gates.length)],
-      time:     DateTime.now(),
-      conf:     85 + _rng.nextDouble() * 15,
-    ));
-    if (_scans.length > 5) _scans.removeLast();
-  }
-
-  String _fmtTime(DateTime d) =>
-      '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}:${d.second.toString().padLeft(2,'0')}';
-
-  String _fmtDate(DateTime d) {
-    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${days[d.weekday % 7]}, ${d.day} ${months[d.month - 1]} ${d.year}';
+      setState(() {
+        _stats      = results[0] as Map<String, dynamic>;
+        _health     = results[1] as Map<String, dynamic>;
+        _threats    = results[2] as List<dynamic>;
+        _recentLogs = results[3] as List<dynamic>;
+        _onCampus   = results[4] as List<dynamic>;
+        _loading    = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeNotifier>();
+    final timeStr = '${_now.hour.toString().padLeft(2,'0')}:${_now.minute.toString().padLeft(2,'0')}:${_now.second.toString().padLeft(2,'0')}';
+    final dateStr = '${_fmtDay(_now.weekday)}, ${_monthName(_now.month)} ${_now.day} ${_now.year}';
 
     return AdminShell(
       activeRoute: '/admin/dashboard',
-      breadcrumb:  'Dashboard',
-      pageTitle:   'Security Command Centre',
+      breadcrumb: 'Dashboard',
+      pageTitle: 'Command Centre',
       topbarActions: [
-        _topbarBtn('⬇ Export', theme),
-        const SizedBox(width: 8),
-        _topbarBtn('↺ Refresh', theme),
+        const LiveBadge(),
+        const SizedBox(width: 12),
+        IconButton(
+          icon: const Icon(Icons.refresh_outlined, size: 18),
+          onPressed: _loadAll,
+          tooltip: 'Refresh',
+          color: theme.textSecondary,
+        ),
       ],
-      rightPanel: _buildRightPanel(theme),
-      body: SingleChildScrollView(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: GeoColors.primary))
+          : _buildBody(theme, timeStr, dateStr),
+    );
+  }
+
+  Widget _buildBody(ThemeNotifier theme, String timeStr, String dateStr) {
+    final activeThreatCount = _threats.length;
+    final entriesCount      = _stats['entries_today'] ?? 0;
+    final onCampusCount     = _stats['on_campus_count'] ?? 0;
+    final profileCount      = _stats['registered_profiles'] ?? 0;
+    final avgConf           = _stats['avg_confidence'] ?? 0.0;
+    final activeCams        = _health['cameras_active'] ?? 0;
+
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // ── MAIN CONTENT ────────────────────────────────────────────
+      Expanded(child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Page title
-          Text('Security Command Centre', style: GoogleFonts.inter(
-            fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary, letterSpacing: -.3,
-          )),
-          const SizedBox(height: 4),
-          Text('Real-time overview of campus security, entries, threats, and system health.',
-            style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
-          const SizedBox(height: 16),
-
-          // Stats
-          _buildStatsGrid(theme),
-          const SizedBox(height: 16),
-
-          // 2-column: threats + feed
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: _buildThreatAlerts(theme)),
-            const SizedBox(width: 20),
-            Expanded(child: _buildLiveFeed(theme)),
+          // Header
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Command Centre', style: GoogleFonts.inter(
+                fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary)),
+              Text('$dateStr · $timeStr', style: GoogleFonts.inter(
+                fontSize: 13, color: theme.textTertiary)),
+            ])),
           ]),
           const SizedBox(height: 20),
 
-          // CCTV preview
-          _buildCctvSection(theme),
+          // Stats row
+          Row(children: [
+            Expanded(child: StatCard(theme: theme, icon: '→', value: '$entriesCount',
+              label: 'Entries Today', iconBg: GeoColors.successGhost, trend: 'Today', trendUp: true)),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(theme: theme, icon: '!', value: '$activeThreatCount',
+              label: 'Active Threats', iconBg: GeoColors.dangerGhost,
+              trend: activeThreatCount > 0 ? 'Action required' : 'All clear',
+              trendUp: false)),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(theme: theme, icon: 'C', value: '$activeCams',
+              label: 'Active Cameras', iconBg: theme.bgBadge)),
+            const SizedBox(width: 12),
+            Expanded(child: StatCard(theme: theme, icon: 'P', value: '$profileCount',
+              label: 'Registered Profiles', iconBg: theme.bgBadge)),
+          ]),
           const SizedBox(height: 20),
 
-          // System health
-          _buildSystemHealth(theme),
+          // People on campus + avg confidence
+          Row(children: [
+            Expanded(child: _campusCard(theme, onCampusCount, avgConf.toDouble())),
+            const SizedBox(width: 20),
+            Expanded(child: _systemHealthCard(theme)),
+          ]),
+          const SizedBox(height: 20),
+
+          // Threat alerts
+          if (_threats.isNotEmpty) ...[
+            _sectionHeader(theme, Icons.warning_amber_outlined, 'Active Threat Alerts', GeoColors.danger),
+            const SizedBox(height: 12),
+            ..._threats.take(5).map((t) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _threatCard(theme, t))),
+            const SizedBox(height: 12),
+          ],
+
+          // Activity Tabs
+          _sectionHeader(theme, Icons.history_outlined, 'Activity', theme.textPrimary),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+              borderRadius: BorderRadius.circular(GeoRadius.lg)),
+            child: Column(children: [
+              // Tab bar
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: theme.border))),
+                child: TabBar(
+                  controller: _tabCtrl,
+                  indicatorColor: GeoColors.primary,
+                  labelColor: GeoColors.primary,
+                  unselectedLabelColor: theme.textTertiary,
+                  labelStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700),
+                  unselectedLabelStyle: GoogleFonts.inter(fontSize: 13),
+                  tabs: [
+                    const Tab(text: 'Recent Scans'),
+                    Tab(text: 'On Campus ($onCampusCount)'),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: 320,
+                child: TabBarView(controller: _tabCtrl, children: [
+                  _buildRecentScans(theme),
+                  _buildOnCampus(theme),
+                ]),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 24),
         ]),
-      ),
+      )),
+
+      // ── RIGHT PANEL: CCTV PREVIEW ──────────────────────────────
+      if (MediaQuery.of(context).size.width > 1100)
+        Container(
+          width: 340,
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: theme.border))),
+          child: _buildRightPanel(theme),
+        ),
+    ]);
+  }
+
+  Widget _campusCard(ThemeNotifier theme, int onCampus, double avgConf) => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+      borderRadius: BorderRadius.circular(GeoRadius.lg)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.people_outline, size: 18, color: GeoColors.primary),
+        const SizedBox(width: 8),
+        Text('People on Campus', style: GoogleFonts.inter(
+          fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+      ]),
+      const SizedBox(height: 16),
+      Text('$onCampus', style: GoogleFonts.inter(
+        fontSize: 42, fontWeight: FontWeight.w800, color: theme.textPrimary)),
+      Text('currently on campus', style: GoogleFonts.inter(
+        fontSize: 13, color: theme.textSecondary)),
+      const SizedBox(height: 16),
+      Row(children: [
+        const Icon(Icons.verified_outlined, size: 14, color: GeoColors.success),
+        const SizedBox(width: 6),
+        Text('Avg FR confidence: ${avgConf.toStringAsFixed(1)}%',
+          style: GoogleFonts.inter(fontSize: 12, color: theme.textSecondary)),
+      ]),
+    ]));
+
+  Widget _systemHealthCard(ThemeNotifier theme) {
+    final cpu    = _health['cpu_percent'] as num? ?? 0;
+    final ram    = _health['ram_percent'] as num? ?? 0;
+    final dbMb   = _health['db_size_mb'] as num? ?? 0;
+    final camT   = _health['cameras_total'] as num? ?? 0;
+    final camA   = _health['cameras_active'] as num? ?? 0;
+    final up     = _health['uptime_seconds'] as num? ?? 0;
+    final upHrs  = (up / 3600).toStringAsFixed(0);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+        borderRadius: BorderRadius.circular(GeoRadius.lg)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.monitor_heart_outlined, size: 18, color: GeoColors.primary),
+          const SizedBox(width: 8),
+          Text('System Health', style: GoogleFonts.inter(
+            fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+        ]),
+        const SizedBox(height: 16),
+        _healthRow(theme, Icons.memory_outlined,       'CPU',       '${cpu.round()}%',    cpu / 100),
+        _healthRow(theme, Icons.storage_outlined,      'RAM',       '${ram.round()}%',    ram / 100),
+        _healthRow(theme, Icons.storage_outlined,      'Database',  '${dbMb.toStringAsFixed(1)} MB', null),
+        _healthRow(theme, Icons.videocam_outlined,     'Cameras',   '$camA / $camT active', null),
+        _healthRow(theme, Icons.access_time_outlined,  'Uptime',    '${upHrs}h', null),
+      ]));
+  }
+
+  Widget _healthRow(ThemeNotifier theme, IconData icon, String label, String value, double? progress) =>
+    Padding(padding: const EdgeInsets.only(bottom: 10), child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(icon, size: 14, color: theme.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: GoogleFonts.inter(fontSize: 12, color: theme.textSecondary))),
+          Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+        ]),
+        if (progress != null) ...[
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(GeoRadius.full),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              backgroundColor: theme.bgBadge,
+              color: progress > 0.85 ? GeoColors.danger : progress > 0.6 ? GeoColors.warning : GeoColors.success,
+              minHeight: 4,
+            )),
+        ],
+      ]));
+
+  Widget _threatCard(ThemeNotifier theme, Map<String, dynamic> t) {
+    final type = t['threat_type'] as String? ?? 'unidentified';
+    final Color bg; final Color fg; final IconData icon; final String label;
+    switch (type) {
+      case 'blacklisted':
+        bg = GeoColors.dangerGhost; fg = GeoColors.danger;
+        icon = Icons.block_outlined; label = 'Blacklisted Individual';
+      case 'unverified':
+        bg = GeoColors.warningGhost; fg = GeoColors.warning;
+        icon = Icons.gps_fixed_outlined; label = 'Geofence Violation';
+      default:
+        bg = const Color(0x1A6366F1); fg = const Color(0xFF6366F1);
+        icon = Icons.person_off_outlined; label = 'Unidentified Person';
+    }
+    final name  = t['user_name'] as String? ?? 'Unknown';
+    final gate  = t['gate']  as String? ?? 'Unknown Gate';
+    final conf  = t['confidence'] as num? ?? 0;
+    final time  = t['detected_at'] as String? ?? '';
+    final timeFmt = time.isNotEmpty
+        ? '${DateTime.parse(time).toLocal().hour.toString().padLeft(2,'0')}:${DateTime.parse(time).toLocal().minute.toString().padLeft(2,'0')}'
+        : '--:--';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: bg.withOpacity(.5), border: Border.all(color: fg.withOpacity(.3)),
+        borderRadius: BorderRadius.circular(GeoRadius.lg)),
+      child: Row(children: [
+        Icon(icon, size: 22, color: fg),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
+          Text('$name — $gate · ${conf.toStringAsFixed(0)}% confidence · $timeFmt',
+            style: GoogleFonts.inter(fontSize: 11, color: theme.textSecondary)),
+        ])),
+        TextButton(
+          onPressed: () => context.go('/admin/threats'),
+          child: Text('View', style: GoogleFonts.inter(fontSize: 12, color: fg, fontWeight: FontWeight.w700)),
+        ),
+      ]),
     );
   }
 
-  Widget _topbarBtn(String label, ThemeNotifier theme) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-    decoration: BoxDecoration(
-      color: theme.bgCard,
-      border: Border.all(color: theme.border),
-      borderRadius: BorderRadius.circular(GeoRadius.sm),
-    ),
-    child: Text(label, style: GoogleFonts.inter(
-      fontSize: 12, fontWeight: FontWeight.w500, color: theme.textSecondary,
-    )),
-  );
+  Widget _buildRecentScans(ThemeNotifier theme) {
+    if (_recentLogs.isEmpty) return Center(child: Text('No entries yet.',
+      style: GoogleFonts.inter(fontSize: 13, color: theme.textTertiary)));
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: _recentLogs.length,
+      itemBuilder: (_, i) {
+        final e    = _recentLogs[i] as Map<String, dynamic>;
+        final name = e['user_name'] as String? ?? 'Unknown';
+        final gate = e['gate'] as String? ?? '';
+        final type = e['type'] as String? ?? 'entry';
+        final conf = (e['confidence'] as num?)?.toDouble() ?? 0;
+        final time = e['timestamp'] as String? ?? '';
+        final timeFmt = time.isNotEmpty
+            ? '${DateTime.parse(time).toLocal().hour.toString().padLeft(2,'0')}:${DateTime.parse(time).toLocal().minute.toString().padLeft(2,'0')}'
+            : '--';
+        final Color typeColor = type == 'entry' ? GeoColors.success : type == 'denied' ? GeoColors.danger : const Color(0xFF6366F1);
+        final initials = name.trim().split(' ').where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
 
-  // ── STATS GRID ────────────────────────────────────────────────────────
-  Widget _buildStatsGrid(ThemeNotifier theme) => Row(children: [
-    Expanded(child: StatCard(
-      theme: theme, icon: '🚪',
-      value: _entryCount.toString(),
-      label: 'Total Entries Today',
-      trend: '▲ 12%', trendUp: true,
-    )),
-    const SizedBox(width: 12),
-    Expanded(child: StatCard(
-      theme: theme, icon: '🚨',
-      value: '3', label: 'Active Threats',
-      trend: '▲ 3 New', trendUp: false,
-      iconBg: GeoColors.dangerGhost, iconColor: GeoColors.danger,
-    )),
-    const SizedBox(width: 12),
-    Expanded(child: StatCard(
-      theme: theme, icon: '📹',
-      value: '11', label: 'Active Cameras',
-      trend: '11/12',
-    )),
-    const SizedBox(width: 12),
-    Expanded(child: StatCard(
-      theme: theme, icon: '👥',
-      value: '1,842', label: 'Registered Profiles',
-      trend: '▲ 8 New', trendUp: true,
-      iconBg: GeoColors.successGhost,
-    )),
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+          child: Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: GeoColors.avatarGradients[name.hashCode.abs() % GeoColors.avatarGradients.length],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight)),
+              child: Center(child: Text(initials, style: GoogleFonts.inter(
+                fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: GoogleFonts.inter(
+                fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary)),
+              Text('$gate · $timeFmt', style: GoogleFonts.inter(
+                fontSize: 11, color: theme.textTertiary)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: typeColor.withOpacity(.1),
+                  borderRadius: BorderRadius.circular(GeoRadius.full)),
+                child: Text(type.substring(0,1).toUpperCase() + type.substring(1),
+                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: typeColor))),
+              const SizedBox(height: 2),
+              Text('${conf.toStringAsFixed(0)}%', style: GoogleFonts.inter(
+                fontSize: 11, color: theme.textTertiary)),
+            ]),
+          ]),
+        );
+      },
+    );
+  }
+
+  Widget _buildOnCampus(ThemeNotifier theme) {
+    if (_onCampus.isEmpty) return Center(child: Text('No one on campus right now.',
+      style: GoogleFonts.inter(fontSize: 13, color: theme.textTertiary)));
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: _onCampus.length,
+      itemBuilder: (_, i) {
+        final u    = _onCampus[i] as Map<String, dynamic>;
+        final name = u['user_name'] as String? ?? 'Unknown';
+        final gate = u['gate']  as String? ?? '';
+        final id   = u['user_id'] as String? ?? '';
+        final dept = u['dept']  as String? ?? '';
+        final initials = name.trim().split(' ').where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+          child: Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: GeoColors.avatarGradients[name.hashCode.abs() % GeoColors.avatarGradients.length],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight)),
+              child: Center(child: Text(initials, style: GoogleFonts.inter(
+                fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: GoogleFonts.inter(
+                fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary)),
+              Text('$id${dept.isNotEmpty ? " · $dept" : ""} · Entered at $gate',
+                style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+            ])),
+            Container(
+              width: 8, height: 8,
+              decoration: const BoxDecoration(color: GeoColors.success, shape: BoxShape.circle)),
+          ]),
+        );
+      },
+    );
+  }
+
+  Widget _buildRightPanel(ThemeNotifier theme) => SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Live Camera Preview
+      Text('Live Camera', style: GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+      const SizedBox(height: 10),
+      GestureDetector(
+        onTap: () => context.go('/admin/cctv'),
+        child: Container(
+          height: 160,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A0A0A),
+            borderRadius: BorderRadius.circular(GeoRadius.md),
+            border: Border.all(color: theme.border)),
+          child: Stack(children: [
+            const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.videocam_outlined, size: 32, color: Colors.white38),
+              SizedBox(height: 8),
+              Text('Click to open CCTV', style: TextStyle(fontSize: 12, color: Colors.white38)),
+            ])),
+            Positioned(top: 8, left: 8, child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: GeoColors.danger, borderRadius: BorderRadius.circular(4)),
+              child: Text('LIVE', style: GoogleFonts.inter(
+                fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)))),
+            Positioned(bottom: 8, right: 8, child: Text('CAM-01 · Main Gate',
+              style: GoogleFonts.inter(fontSize: 10, color: Colors.white60))),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 20),
+
+      // Quick stats
+      Text('Quick Stats', style: GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+      const SizedBox(height: 10),
+      _quickStat(theme, Icons.login_outlined,       'Entries today',    '${_stats['entries_today'] ?? 0}'),
+      _quickStat(theme, Icons.logout_outlined,      'Exits today',      '${_stats['exits_today'] ?? 0}'),
+      _quickStat(theme, Icons.block_outlined,       'Access denied',    '${_stats['denied_today'] ?? 0}'),
+      _quickStat(theme, Icons.warning_amber_outlined, 'Active threats',  '${_threats.length}'),
+      const SizedBox(height: 20),
+
+      // Quick links
+      Text('Quick Access', style: GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+      const SizedBox(height: 10),
+      _quickLink(theme, Icons.history_outlined,           'Entry History',     '/admin/entries'),
+      _quickLink(theme, Icons.warning_amber_outlined,     'Security Threats',  '/admin/threats'),
+      _quickLink(theme, Icons.videocam_outlined,          'CCTV Feed',         '/admin/cctv'),
+      _quickLink(theme, Icons.badge_outlined,             'Visitor Management','/admin/visitors'),
+    ]));
+
+  Widget _quickStat(ThemeNotifier theme, IconData icon, String label, String val) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(children: [
+      Icon(icon, size: 15, color: theme.textTertiary),
+      const SizedBox(width: 8),
+      Expanded(child: Text(label, style: GoogleFonts.inter(fontSize: 12, color: theme.textSecondary))),
+      Text(val, style: GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w800, color: theme.textPrimary)),
+    ]));
+
+  Widget _quickLink(ThemeNotifier theme, IconData icon, String label, String route) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: GestureDetector(
+      onTap: () => context.go(route),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.bgBadge,
+          borderRadius: BorderRadius.circular(GeoRadius.sm)),
+        child: Row(children: [
+          Icon(icon, size: 15, color: GeoColors.primary),
+          const SizedBox(width: 10),
+          Text(label, style: GoogleFonts.inter(
+            fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary)),
+          const Spacer(),
+          Icon(Icons.chevron_right, size: 16, color: theme.textTertiary),
+        ]),
+      )));
+
+  Widget _sectionHeader(ThemeNotifier theme, IconData icon, String title, Color color) => Row(children: [
+    Icon(icon, size: 16, color: color),
+    const SizedBox(width: 8),
+    Text(title, style: GoogleFonts.inter(
+      fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
   ]);
 
-  // ── THREAT ALERTS ─────────────────────────────────────────────────────
-  Widget _buildThreatAlerts(ThemeNotifier theme) => SectionCard(
-    theme: theme,
-    title: '⚠️ Threat Alerts',
-    count: '3 Active', redCount: true,
-    linkLabel: 'View All →',
-    onLink: () => context.go('/admin/threats'),
-    child: Column(children: [
-      _alertItem(theme, '🚫', 'Unknown face — North Gate',
-          '📍 Gate 1 · 09:42 AM · No match in database', 'Critical', true),
-      const SizedBox(height: 10),
-      _alertItem(theme, '🚷', 'Blacklisted individual — East Entrance',
-          '📍 Gate 3 · 10:15 AM · ID: BL-00499', 'Critical', true),
-      const SizedBox(height: 10),
-      _alertItem(theme, '🚶', 'Tailgating — Library Entrance',
-          '📍 Gate 5 · 11:03 AM · 3 people on 1 scan', 'Warning', false),
-    ]),
-  );
-
-  Widget _alertItem(ThemeNotifier theme, String icon, String title, String meta,
-      String badge, bool critical) {
-    final color = critical ? GeoColors.danger : GeoColors.warning;
-    final ghost = critical ? GeoColors.dangerGhost : GeoColors.warningGhost;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(GeoRadius.md),
-        border: Border(left: BorderSide(color: color, width: 3)),
-      ),
-      child: Row(children: [
-        Container(
-          width: 34, height: 34,
-          decoration: BoxDecoration(color: ghost, borderRadius: BorderRadius.circular(GeoRadius.md)),
-          child: Center(child: Text(icon, style: const TextStyle(fontSize: 15))),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: GoogleFonts.inter(
-            fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary,
-          )),
-          Text(meta, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
-        ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
-          decoration: BoxDecoration(color: ghost, borderRadius: BorderRadius.circular(GeoRadius.full)),
-          child: Text(badge.toUpperCase(), style: GoogleFonts.inter(
-            fontSize: 10, fontWeight: FontWeight.w700, color: color, letterSpacing: .5,
-          )),
-        ),
-      ]),
-    );
-  }
-
-  // ── LIVE FEED ─────────────────────────────────────────────────────────
-  Widget _buildLiveFeed(ThemeNotifier theme) => SectionCard(
-    theme: theme,
-    title: '🟢 Live Activity Feed',
-    count: 'Real-time',
-    linkLabel: 'Full Log →',
-    onLink: () => context.go('/admin/entries'),
-    child: Column(
-      children: _feed.map((f) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: _feedRow(theme, f),
-      )).toList(),
-    ),
-  );
-
-  Widget _feedRow(ThemeNotifier theme, _FeedItem f) {
-    final confColor = f.type == 'denied'
-        ? GeoColors.danger
-        : f.conf < 75 ? GeoColors.warning : GeoColors.success;
-    final typeLabel = f.type == 'exit' ? '↩ Exit'
-        : f.type == 'denied' ? '🚫 Denied' : '→ Entry';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.border),
-        borderRadius: BorderRadius.circular(GeoRadius.md),
-      ),
-      child: Row(children: [
-        AvatarCircle(
-          initials: f.initials,
-          gradient: [
-            _hexColor(f.colors[0]),
-            _hexColor(f.colors.length > 1 ? f.colors[1] : f.colors[0]),
-          ],
-          size: 36, fontSize: 12,
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(f.name, style: GoogleFonts.inter(
-            fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary,
-          )),
-          Text('${f.id} · ${f.gate} · ${_fmtTime(f.time)}',
-            style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ])),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text('${f.conf.toStringAsFixed(1)}%', style: GoogleFonts.inter(
-            fontSize: 13, fontWeight: FontWeight.w700, color: confColor,
-          )),
-          Text(typeLabel, style: GoogleFonts.inter(
-            fontSize: 11, color: theme.textTertiary,
-          )),
-        ]),
-      ]),
-    );
-  }
-
-  // ── CCTV GRID ─────────────────────────────────────────────────────────
-  Widget _buildCctvSection(ThemeNotifier theme) => Container(
-    decoration: BoxDecoration(
-      color: theme.bgCard,
-      border: Border.all(color: theme.border),
-      borderRadius: BorderRadius.circular(GeoRadius.lg),
-    ),
-    child: Column(children: [
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(children: [
-          Text('📹 Live Camera Preview', style: GoogleFonts.inter(
-            fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary,
-          )),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: BoxDecoration(color: theme.bgBadge, borderRadius: BorderRadius.circular(GeoRadius.full)),
-            child: Text('11 / 12 Online', style: GoogleFonts.inter(
-              fontSize: 11, fontWeight: FontWeight.w600, color: theme.textSecondary,
-            )),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => context.go('/admin/cctv'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                border: Border.all(color: GeoColors.primaryGhost),
-                borderRadius: BorderRadius.circular(GeoRadius.sm),
-              ),
-              child: Text('Full Feed →', style: GoogleFonts.inter(
-                fontSize: 11, fontWeight: FontWeight.w600, color: GeoColors.primary,
-              )),
-            ),
-          ),
-        ]),
-      ),
-      Divider(height: 1, color: theme.border),
-      Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(children: [
-          _cctvCell('assets/cctv_main_gate.png',  '📍 Main Gate — CAM-01',   false, theme),
-          const SizedBox(width: 14),
-          _cctvCell('assets/cctv_library.png',    '📍 Library — CAM-02',     false, theme),
-          const SizedBox(width: 14),
-          _cctvCell('assets/cctv_lobby.png',      '📍 Admin Block — CAM-05', false, theme),
-          const SizedBox(width: 14),
-          _cctvCell('assets/cctv_parking.png',    '📍 Sports Complex — CAM-09 · OFFLINE', true, theme),
-        ]),
-      ),
-    ]),
-  );
-
-  Widget _cctvCell(String asset, String label, bool offline, ThemeNotifier theme) =>
-      Expanded(child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(GeoRadius.md),
-          child: Stack(children: [
-            Positioned.fill(child: Image.asset(
-              asset, fit: BoxFit.cover,
-              color: offline ? Colors.black.withOpacity(.7) : null,
-              colorBlendMode: offline ? BlendMode.darken : null,
-              errorBuilder: (_, __, ___) => Container(
-                color: const Color(0xFF111111),
-                child: const Center(child: Text('📹', style: TextStyle(fontSize: 28))),
-              ),
-            )),
-            if (!offline) Positioned(top: 8, left: 8, child: Row(children: [
-              const LiveDot(), const SizedBox(width: 4),
-              Text('LIVE', style: GoogleFonts.inter(
-                fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white,
-              )),
-            ])),
-            Positioned(bottom: 0, left: 0, right: 0, child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: const BoxDecoration(gradient: LinearGradient(
-                begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                colors: [Color(0xD9000000), Colors.transparent],
-              )),
-              child: Text(label, style: GoogleFonts.inter(
-                fontSize: 10, fontWeight: FontWeight.w600, color: Colors.white,
-              )),
-            )),
-          ]),
-        ),
-      ));
-
-  // ── SYSTEM HEALTH ─────────────────────────────────────────────────────
-  Widget _buildSystemHealth(ThemeNotifier theme) => SectionCard(
-    theme: theme, title: '⚙️ System Health',
-    child: Row(children: [
-      Expanded(child: HealthCard(theme: theme, label: 'AI Recognition',
-        value: '91%', sub: 'CPU Load · Online', progress: .91,
-        barColor: GeoColors.success, status: 'online')),
-      const SizedBox(width: 14),
-      Expanded(child: HealthCard(theme: theme, label: 'Database',
-        value: '68%', sub: 'Storage Used · Online', progress: .68,
-        barColor: const Color(0xFF555555), status: 'online')),
-      const SizedBox(width: 14),
-      Expanded(child: HealthCard(theme: theme, label: 'CCTV Network',
-        value: '11 / 12', sub: 'Cameras Active · 1 Offline', progress: .92,
-        barColor: GeoColors.warning, status: 'degraded')),
-      const SizedBox(width: 14),
-      Expanded(child: HealthCard(theme: theme, label: 'Gate Control',
-        value: '8 / 8', sub: 'Gates Operational', progress: 1,
-        barColor: GeoColors.success, status: 'online')),
-    ]),
-  );
-
-  // ── RIGHT PANEL ───────────────────────────────────────────────────────
-  Widget _buildRightPanel(ThemeNotifier theme) => Container(
-    width: 320,
-    color: theme.bgCard,
-    child: Column(children: [
-      Divider(height: 1, color: theme.border),
-      // Clock
-      Container(
-        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-            colors: [theme.bgBadge, theme.bgCard],
-          ),
-          border: Border(bottom: BorderSide(color: theme.border)),
-        ),
-        child: Column(children: [
-          Text(_fmtTime(_now), style: GoogleFonts.inter(
-            fontSize: 34, fontWeight: FontWeight.w800,
-            letterSpacing: -1.5, color: theme.textPrimary,
-          )),
-          Text(_fmtDate(_now), style: GoogleFonts.inter(
-            fontSize: 12, color: theme.textTertiary,
-          )),
-          const SizedBox(height: 10),
-          const LiveBadge(label: 'MONITORING LIVE'),
-        ]),
-      ),
-
-      Expanded(child: SingleChildScrollView(child: Column(children: [
-        // Threat summary
-        _panelSection(theme, 'THREAT SUMMARY', Column(children: [
-          _threatSummaryRow(theme, GeoColors.danger,  'Unauthorized Access', '2', red: true),
-          _threatSummaryRow(theme, GeoColors.warning, 'Tailgating',          '1'),
-          _threatSummaryRow(theme, const Color(0xFF666666), 'Low Confidence', '4'),
-          _threatSummaryRow(theme, GeoColors.danger,  'Blacklisted',         '1', red: true),
-        ])),
-
-        // Recent scans
-        _panelSection(theme, 'RECENT SCANS', Column(
-          children: _scans.map((s) => _scanItem(theme, s)).toList(),
-        )),
-
-        // Today at a glance
-        _panelSection(theme, 'TODAY AT A GLANCE', Column(children: [
-          _threatSummaryRow(theme, const Color(0xFF111111), 'Peak Hour', '09:00 – 10:00'),
-          _threatSummaryRow(theme, const Color(0xFF111111), 'Busiest Gate', 'Main Gate'),
-          _threatSummaryRow(theme, GeoColors.success,
-              'Avg Confidence', '${_avgConf.toStringAsFixed(1)}%'),
-        ])),
-
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: GestureDetector(
-            onTap: () => context.go('/admin/entries'),
-            child: Container(
-              width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: GeoColors.primary,
-                borderRadius: BorderRadius.circular(GeoRadius.md),
-              ),
-              child: Center(child: Text('📋 View Full Activity Log',
-                style: GoogleFonts.inter(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white,
-                ),
-              )),
-            ),
-          ),
-        ),
-      ]))),
-    ]),
-  );
-
-  Widget _panelSection(ThemeNotifier theme, String title, Widget child) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: theme.border)),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: GoogleFonts.inter(
-        fontSize: 11, fontWeight: FontWeight.w700,
-        color: theme.textTertiary, letterSpacing: .8,
-      )),
-      const SizedBox(height: 14),
-      child,
-    ]),
-  );
-
-  Widget _threatSummaryRow(ThemeNotifier theme, Color dot, String name, String count, {bool red = false}) =>
-    Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-        const SizedBox(width: 8),
-        Expanded(child: Text(name, style: GoogleFonts.inter(
-          fontSize: 12, fontWeight: FontWeight.w500, color: theme.textPrimary,
-        ))),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: red ? GeoColors.dangerGhost : theme.bgBadge,
-            borderRadius: BorderRadius.circular(GeoRadius.full),
-          ),
-          child: Text(count, style: GoogleFonts.inter(
-            fontSize: 12, fontWeight: FontWeight.w700,
-            color: red ? GeoColors.danger : theme.textSecondary,
-          )),
-        ),
-      ]),
-    );
-
-  Widget _scanItem(ThemeNotifier theme, _ScanItem s) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Row(children: [
-      AvatarCircle(
-        initials: s.initials,
-        gradient: [_hexColor(s.colors[0]), _hexColor(s.colors.length > 1 ? s.colors[1] : s.colors[0])],
-        size: 32, fontSize: 11,
-      ),
-      const SizedBox(width: 10),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(s.name, style: GoogleFonts.inter(
-          fontSize: 12, fontWeight: FontWeight.w600, color: theme.textPrimary,
-        )),
-        Text('${s.gate} · ${_fmtTime(s.time)}', style: GoogleFonts.inter(
-          fontSize: 11, color: theme.textTertiary,
-        )),
-      ])),
-      Text('${s.conf.toStringAsFixed(1)}%', style: GoogleFonts.inter(
-        fontSize: 12, fontWeight: FontWeight.w700, color: GeoColors.success,
-      )),
-    ]),
-  );
-
-  Color _hexColor(String hex) {
-    try {
-      return Color(int.parse(hex.trim().replaceAll('#', '0xFF')));
-    } catch (_) {
-      return GeoColors.primary;
-    }
-  }
-}
-
-class _FeedItem {
-  final String name, id, initials, gate, type;
-  final List<String> colors;
-  final DateTime time;
-  final double conf;
-  const _FeedItem({required this.name, required this.id, required this.initials,
-    required this.colors, required this.gate, required this.time,
-    required this.conf, required this.type});
-}
-
-class _ScanItem {
-  final String name, initials, gate;
-  final List<String> colors;
-  final DateTime time;
-  final double conf;
-  const _ScanItem({required this.name, required this.initials, required this.colors,
-    required this.gate, required this.time, required this.conf});
+  String _fmtDay(int d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d-1];
+  String _monthName(int m) => ['January','February','March','April','May','June',
+    'July','August','September','October','November','December'][m-1];
 }

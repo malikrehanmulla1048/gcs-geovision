@@ -1,8 +1,9 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
+import '../../services/auth_service.dart';
+import '../../services/backend_service.dart';
 import '../../widgets/admin_sidebar.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -13,46 +14,79 @@ class VisitorManagementScreen extends StatefulWidget {
 }
 
 class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
-  final _rng = Random();
-  final List<_Visitor> _visitors = [];
+  late final BackendService _backend;
+  List<dynamic> _visitors = [];
+  bool _loading   = true;
+  bool _showForm  = false;
 
-  static const _colors = ['#7c3aed','#2563eb','#0891b2','#059669','#d97706','#e11d48'];
-  static const _gates  = ['Main Gate','East Entrance','North Gate','Admin Block Entry'];
+  // Form controllers
+  final _nameCtrl    = TextEditingController();
+  final _phoneCtrl   = TextEditingController();
+  final _purposeCtrl = TextEditingController();
+  final _hostCtrl    = TextEditingController();
+  final _deptCtrl    = TextEditingController();
+  final _idCtrl      = TextEditingController();
+  String _gate = 'Main Gate';
+  bool _submitting = false;
+
+  static const _gates = ['Main Gate', 'East Entrance', 'North Gate', 'Admin Block Entry'];
 
   @override
   void initState() {
     super.initState();
-    _seedVisitors();
+    _backend = context.read<AuthService>().backend;
+    _load();
   }
 
-  void _seedVisitors() {
-    final seeds = [
-      ['Ramesh Kumar',  '+91 98001 11111','Meeting Faculty', 'Dr. Ravi Shankar',    'CS Dept',   'KA-DL-2021-0001234','On Campus'],
-      ['Ananya Shah',   '+91 98001 22222','Parent Visit',    'Admin Office',        'Admin Block','MH-5432109876',     'On Campus'],
-      ['Courier Exec',  '+91 98001 33333','Delivery',        'Admin Block',         'Admin Block','CORP-DELIVERY-001', 'On Campus'],
-      ['Dr. Jha',       '+91 98001 44444','Guest Lecture',   'Prof. Meenakshi Iyer','EC Dept',   'GOV-GJ-19875432',   'On Campus'],
-      ['Vijay Thomas',  '+91 98001 55555','Maintenance',     'Facilities',          'Lab Block', 'MAINT-2024-007',    'Exited'],
-    ];
-    for (final s in seeds) {
-      final name = s[0];
-      final initials = name.split(' ').take(2).map((w) => w[0]).join().toUpperCase();
-      _visitors.add(_Visitor(
-        id: _visitors.length + 1,
-        name: name, phone: s[1], purpose: s[2], host: s[3], dept: s[4], idnum: s[5],
-        status: s[6], gate: _gates[_rng.nextInt(_gates.length)],
-        checkinAt: DateTime.now(), initials: initials,
-        color: _colors[_visitors.length % _colors.length],
-      ));
+  @override
+  void dispose() {
+    _nameCtrl.dispose(); _phoneCtrl.dispose();
+    _purposeCtrl.dispose(); _hostCtrl.dispose();
+    _deptCtrl.dispose(); _idCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final visitors = await _backend.getVisitors();
+    if (!mounted) return;
+    setState(() { _visitors = visitors; _loading = false; });
+  }
+
+  Future<void> _submit() async {
+    if (_nameCtrl.text.trim().isEmpty || _purposeCtrl.text.trim().isEmpty) {
+      GeoToast.show(context, 'Please fill in Name and Purpose.', type: 'error');
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      await _backend.addVisitor(
+        name:     _nameCtrl.text.trim(),
+        phone:    _phoneCtrl.text.trim(),
+        purpose:  _purposeCtrl.text.trim(),
+        host:     _hostCtrl.text.trim(),
+        dept:     _deptCtrl.text.trim(),
+        idNumber: _idCtrl.text.trim(),
+        gate:     _gate,
+      );
+      _nameCtrl.clear(); _phoneCtrl.clear(); _purposeCtrl.clear();
+      _hostCtrl.clear(); _deptCtrl.clear();  _idCtrl.clear();
+      setState(() { _showForm = false; _submitting = false; });
+      GeoToast.show(context, 'Visitor checked in.', type: 'success');
+      _load();
+    } catch (e) {
+      setState(() => _submitting = false);
+      GeoToast.show(context, 'Error: $e', type: 'error');
     }
   }
 
-  Color _hexColor(String hex) {
-    try { return Color(int.parse(hex.trim().replaceAll('#', '0xFF'))); }
-    catch (_) { return GeoColors.primary; }
+  Future<void> _checkout(int id) async {
+    await _backend.checkoutVisitor(id);
+    _load();
+    GeoToast.show(context, 'Visitor checked out.', type: 'success');
   }
 
-  int get _active   => _visitors.where((v) => v.status == 'On Campus').length;
-  int get _exited   => _visitors.where((v) => v.status == 'Exited').length;
+  int get _active  => _visitors.where((v) => v['status'] == 'On Campus').length;
+  int get _exited  => _visitors.where((v) => v['status'] == 'Exited').length;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +97,10 @@ class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
       breadcrumb: 'Visitor Management',
       pageTitle: 'Visitor Management',
       topbarActions: [
-        _topBtn('⬇ Export Log', theme),
+        _topBtn(theme, Icons.person_add_outlined, 'Add Visitor',
+          () => setState(() => _showForm = !_showForm)),
+        const SizedBox(width: 8),
+        _topBtn(theme, Icons.refresh_outlined, 'Refresh', _load),
       ],
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -71,110 +108,91 @@ class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
           Text('Visitor Management', style: GoogleFonts.inter(
             fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary)),
           const SizedBox(height: 4),
-          Text('Register new visitors, monitor active guests, and track their location.',
+          Text('Register new visitors and manage campus guest access.',
             style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
           const SizedBox(height: 20),
 
           // Stats
           Row(children: [
-            Expanded(child: StatCard(theme: theme, icon: '🪪',
-              value: '$_active', label: 'On Campus Now',
-              trend: '▲ Today', trendUp: true, iconBg: GeoColors.successGhost)),
+            Expanded(child: StatCard(theme: theme, icon: 'A', value: '$_active',
+              label: 'On Campus Now', trend: 'Today', trendUp: true, iconBg: GeoColors.successGhost)),
             const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '📋',
-              value: '${_visitors.length}', label: 'Total Visitors Today')),
+            Expanded(child: StatCard(theme: theme, icon: 'T', value: '${_visitors.length}',
+              label: 'Total Today')),
             const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '⏳',
-              value: '0', label: 'Awaiting Check-in', iconBg: GeoColors.warningGhost)),
-            const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '🚪',
-              value: '$_exited', label: 'Exited Today',
-              trend: '▼ Today', trendUp: false, iconBg: GeoColors.dangerGhost)),
+            Expanded(child: StatCard(theme: theme, icon: 'E', value: '$_exited',
+              label: 'Exited Today', iconBg: theme.bgBadge, trendUp: false)),
           ]),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
-          // Add visitor + map row
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Add visitor card
-            Expanded(child: Container(
-              height: 380,
+          // Add visitor form (toggle)
+          if (_showForm) ...[
+            Container(
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
                 borderRadius: BorderRadius.circular(GeoRadius.lg)),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Text('🪪', style: TextStyle(fontSize: 48)),
-                const SizedBox(height: 18),
-                Text('Visitor Enrolment', style: GoogleFonts.inter(
-                  fontSize: 18, fontWeight: FontWeight.w700, color: theme.textPrimary)),
-                const SizedBox(height: 6),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Text(
-                    'Register a new visitor, capture their details and facial data securely.',
-                    style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary),
-                    textAlign: TextAlign.center)),
-                const SizedBox(height: 24),
-                GestureDetector(
-                  onTap: () => GeoToast.show(context, 'Visitor registration form coming soon', type: 'info'),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
-                    decoration: BoxDecoration(color: GeoColors.primary,
-                      borderRadius: BorderRadius.circular(GeoRadius.md)),
-                    child: Text('✚ Add Visitor', style: GoogleFonts.inter(
-                      fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)))),
-              ])),
-            ),
-            const SizedBox(width: 24),
-
-            // Live tracker map placeholder
-            Expanded(child: Container(
-              height: 380,
-              decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
-                borderRadius: BorderRadius.circular(GeoRadius.lg)),
-              child: Column(children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('📍 Live Visitor Tracker', style: GoogleFonts.inter(
-                      fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
-                    Text('🟠 Visitors on campus   🔵 Security guards',
-                      style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.person_add_outlined, size: 18, color: GeoColors.primary),
+                  const SizedBox(width: 8),
+                  Text('Register Visitor', style: GoogleFonts.inter(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: theme.textPrimary)),
+                  const Spacer(),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _showForm = false),
+                    color: theme.textTertiary),
+                ]),
+                const SizedBox(height: 16),
+                Row(children: [
+                  Expanded(child: _field(theme, 'Full Name *', _nameCtrl)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _field(theme, 'Phone Number', _phoneCtrl, type: TextInputType.phone)),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: _field(theme, 'Purpose of Visit *', _purposeCtrl)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _field(theme, 'Host / Meeting With', _hostCtrl)),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: _field(theme, 'Department / Destination', _deptCtrl)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _field(theme, 'Govt. ID Number', _idCtrl)),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Entry Gate', style: GoogleFonts.inter(
+                      fontSize: 11, fontWeight: FontWeight.w700, color: theme.textTertiary)),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      value: _gate,
+                      dropdownColor: theme.bgCard,
+                      style: GoogleFonts.inter(color: theme.textPrimary, fontSize: 14),
+                      decoration: InputDecoration(
+                        filled: true, fillColor: theme.bgInput,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(GeoRadius.md),
+                          borderSide: BorderSide(color: theme.border)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13)),
+                      items: _gates.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                      onChanged: (v) => setState(() => _gate = v!)),
                   ])),
-                Expanded(child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(GeoRadius.lg)),
-                  child: Stack(children: [
-                    // Simulated map background
-                    Positioned.fill(child: CustomPaint(painter: _MapPainter(theme))),
-                    // Visitor dots
-                    ..._visitors.where((v) => v.status != 'Exited').map((v) {
-                      final dx = 80.0 + _rng.nextInt(200);
-                      final dy = 60.0 + _rng.nextInt(200);
-                      return Positioned(left: dx, top: dy, child: Container(
-                        width: 28, height: 28,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF97316), shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [BoxShadow(color: Colors.orange.withOpacity(.5), blurRadius: 8)]),
-                        child: Center(child: Text(v.initials, style: GoogleFonts.inter(
-                          fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white)))));
-                    }),
-                    // Guard dots
-                    ...List.generate(3, (i) => Positioned(
-                      left: 50.0 + i * 120, top: 150.0,
-                      child: Container(
-                        width: 24, height: 24,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2563EB), shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2)),
-                        child: Center(child: Text('G', style: GoogleFonts.inter(
-                          fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white))))),
-                    ),
-                  ])))
-              ]))),
-          ]),
-          const SizedBox(height: 24),
+                ]),
+                const SizedBox(height: 20),
+                SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                  icon: _submitting
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.login, size: 16),
+                  label: Text(_submitting ? 'Checking in...' : 'Check In Visitor'),
+                  onPressed: _submitting ? null : _submit,
+                )),
+              ]),
+            ),
+            const SizedBox(height: 20),
+          ],
 
-          // Active visitors table
+          // Visitor list
           Container(
             decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
               borderRadius: BorderRadius.circular(GeoRadius.lg)),
@@ -182,13 +200,16 @@ class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(children: [
-                  Text('👥 Active Visitors', style: GoogleFonts.inter(
+                  const Icon(Icons.people_outline, size: 16, color: GeoColors.primary),
+                  const SizedBox(width: 8),
+                  Text('Visitors', style: GoogleFonts.inter(
                     fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
                   const SizedBox(width: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(color: theme.bgBadge, borderRadius: BorderRadius.circular(GeoRadius.full)),
-                    child: Text('$_active Active, ${_visitors.length} Total',
+                    decoration: BoxDecoration(color: theme.bgBadge,
+                      borderRadius: BorderRadius.circular(GeoRadius.full)),
+                    child: Text('$_active on campus · ${_visitors.length} total',
                       style: GoogleFonts.inter(fontSize: 11, color: theme.textSecondary))),
                 ])),
               Divider(height: 1, color: theme.border),
@@ -198,60 +219,111 @@ class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
                 color: theme.bgBadge,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(children: [
-                  _th(theme, '#', 40), _th(theme, 'Visitor', 180),
-                  _th(theme, 'Purpose', 130), _th(theme, 'Host', 150),
-                  _th(theme, 'Check-in', 100), _th(theme, 'Gate', 130),
-                  _th(theme, 'Status', 100), _th(theme, 'Action', 100),
+                  _th(theme, '#',        40),
+                  _th(theme, 'Visitor',  180),
+                  _th(theme, 'Purpose',  130),
+                  _th(theme, 'Host',     140),
+                  _th(theme, 'Gate',     120),
+                  _th(theme, 'Check-in', 90),
+                  _th(theme, 'Status',   100),
+                  _th(theme, 'Action',   110),
                 ])),
               Divider(height: 1, color: theme.border),
 
-              ..._visitors.asMap().entries.map((e) {
-                final v = e.value;
-                final statusBg = v.status == 'On Campus' ? GeoColors.successGhost
-                    : v.status == 'Checking In' ? GeoColors.warningGhost : theme.bgBadge;
-                final statusFg = v.status == 'On Campus' ? GeoColors.success
-                    : v.status == 'Checking In' ? GeoColors.warning : theme.textTertiary;
-                final timeStr = '${v.checkinAt.hour.toString().padLeft(2,'0')}:${v.checkinAt.minute.toString().padLeft(2,'0')}';
-                return Container(
-                  decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(children: [
-                      SizedBox(width: 40, child: Text((e.key+1).toString().padLeft(2,'0'),
-                        style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary, fontWeight: FontWeight.w600))),
-                      SizedBox(width: 180, child: Row(children: [
-                        Container(width: 36, height: 36, decoration: BoxDecoration(
-                          shape: BoxShape.circle, color: _hexColor(v.color)),
-                          child: Center(child: Text(v.initials, style: GoogleFonts.inter(
-                            fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)))),
-                        const SizedBox(width: 10),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(v.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary), overflow: TextOverflow.ellipsis),
-                          Text(v.idnum, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+              if (_loading)
+                const Padding(padding: EdgeInsets.all(40),
+                  child: Center(child: CircularProgressIndicator(color: GeoColors.primary)))
+              else if (_visitors.isEmpty)
+                Padding(padding: const EdgeInsets.all(40), child: Center(child: Column(children: [
+                  const Icon(Icons.badge_outlined, size: 40, color: GeoColors.success),
+                  const SizedBox(height: 12),
+                  Text('No visitors today.', style: GoogleFonts.inter(
+                    fontSize: 13, color: theme.textTertiary)),
+                ])))
+              else
+                ..._visitors.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final v = entry.value as Map<String, dynamic>;
+                  final name      = v['name']     as String? ?? '—';
+                  final phone     = v['phone']    as String? ?? '';
+                  final purpose   = v['purpose']  as String? ?? '—';
+                  final host      = v['host']     as String? ?? '—';
+                  final gate      = v['gate']     as String? ?? '—';
+                  final status    = v['status']   as String? ?? 'On Campus';
+                  final idnum     = v['id_number'] as String? ?? '';
+                  final checkinRaw = v['checkin_at'] as String? ?? '';
+                  final checkinFmt = checkinRaw.isNotEmpty
+                      ? () { final d = DateTime.parse(checkinRaw).toLocal();
+                          return '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}'; }()
+                      : '--:--';
+                  final initials = name.trim().split(' ')
+                      .where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
+                  final onCampus = status == 'On Campus';
+                  final statusBg = onCampus ? GeoColors.successGhost : theme.bgBadge;
+                  final statusFg = onCampus ? GeoColors.success : theme.textTertiary;
+
+                  return Container(
+                    decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(children: [
+                        SizedBox(width: 40, child: Text((i+1).toString().padLeft(2,'0'),
+                          style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary,
+                            fontWeight: FontWeight.w600))),
+                        SizedBox(width: 180, child: Row(children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: GeoColors.avatarGradients[name.hashCode.abs() % GeoColors.avatarGradients.length],
+                                begin: Alignment.topLeft, end: Alignment.bottomRight)),
+                            child: Center(child: Text(initials, style: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(name, style: GoogleFonts.inter(fontSize: 13,
+                              fontWeight: FontWeight.w600, color: theme.textPrimary),
+                              overflow: TextOverflow.ellipsis),
+                            Text(idnum.isNotEmpty ? idnum : (phone.isNotEmpty ? phone : '—'),
+                              style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary),
+                              overflow: TextOverflow.ellipsis),
+                          ])),
                         ])),
-                      ])),
-                      SizedBox(width: 130, child: Text(v.purpose, style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
-                      SizedBox(width: 150, child: Text(v.host, style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
-                      SizedBox(width: 100, child: Text(timeStr, style: GoogleFonts.inter(fontSize: 12, color: theme.textPrimary))),
-                      SizedBox(width: 130, child: Text('📍 ${v.gate}', style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
-                      SizedBox(width: 100, child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(GeoRadius.full)),
-                        child: Text(v.status, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: statusFg)))),
-                      SizedBox(width: 100, child: v.status != 'Exited'
-                        ? GestureDetector(
-                            onTap: () => setState(() => v.status = 'Exited'),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                              decoration: BoxDecoration(border: Border.all(color: GeoColors.dangerGhost),
-                                borderRadius: BorderRadius.circular(GeoRadius.sm)),
-                              child: Text('Check Out', style: GoogleFonts.inter(
-                                fontSize: 11, fontWeight: FontWeight.w600, color: GeoColors.danger))))
-                        : Text('Checked out', style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary))),
-                    ]),
-                  ),
-                );
-              }),
+                        SizedBox(width: 130, child: Text(purpose, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
+                        SizedBox(width: 140, child: Text(host, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
+                        SizedBox(width: 120, child: Text(gate, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
+                        SizedBox(width: 90, child: Text(checkinFmt, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary))),
+                        SizedBox(width: 100, child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(color: statusBg,
+                            borderRadius: BorderRadius.circular(GeoRadius.full)),
+                          child: Text(status, style: GoogleFonts.inter(
+                            fontSize: 11, fontWeight: FontWeight.w700, color: statusFg)))),
+                        SizedBox(width: 110, child: onCampus
+                            ? GestureDetector(
+                                onTap: () => _checkout(v['id'] as int),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: GeoColors.danger),
+                                    borderRadius: BorderRadius.circular(GeoRadius.sm)),
+                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    const Icon(Icons.logout, size: 12, color: GeoColors.danger),
+                                    const SizedBox(width: 4),
+                                    Text('Check Out', style: GoogleFonts.inter(
+                                      fontSize: 11, fontWeight: FontWeight.w600, color: GeoColors.danger)),
+                                  ])))
+                            : Text('Exited', style: GoogleFonts.inter(
+                                fontSize: 11, color: theme.textTertiary))),
+                      ]),
+                    ),
+                  );
+                }),
             ]),
           ),
         ]),
@@ -259,53 +331,35 @@ class _VisitorManagementScreenState extends State<VisitorManagementScreen> {
     );
   }
 
-  Widget _th(ThemeNotifier theme, String label, double w) => SizedBox(
-    width: w, child: Text(label.toUpperCase(), style: GoogleFonts.inter(
+  Widget _field(ThemeNotifier theme, String label, TextEditingController ctrl,
+      {TextInputType? type}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(label, style: GoogleFonts.inter(
+      fontSize: 11, fontWeight: FontWeight.w700, color: theme.textTertiary)),
+    const SizedBox(height: 6),
+    TextField(controller: ctrl, keyboardType: type,
+      style: GoogleFonts.inter(fontSize: 14, color: theme.textPrimary),
+      decoration: InputDecoration(
+        filled: true, fillColor: theme.bgInput,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(GeoRadius.md),
+          borderSide: BorderSide(color: theme.border)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13))),
+  ]);
+
+  Widget _th(ThemeNotifier theme, String label, double w) => SizedBox(width: w,
+    child: Text(label.toUpperCase(), style: GoogleFonts.inter(
       fontSize: 11, fontWeight: FontWeight.w700, color: theme.textTertiary, letterSpacing: .5)));
 
-  Widget _topBtn(String label, ThemeNotifier theme) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-    decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
-      borderRadius: BorderRadius.circular(GeoRadius.sm)),
-    child: Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: theme.textSecondary)));
-}
-
-class _Visitor {
-  final int id;
-  final String name, phone, purpose, host, dept, idnum, gate, initials, color;
-  String status;
-  final DateTime checkinAt;
-  _Visitor({required this.id, required this.name, required this.phone,
-    required this.purpose, required this.host, required this.dept,
-    required this.idnum, required this.status, required this.gate,
-    required this.checkinAt, required this.initials, required this.color});
-}
-
-class _MapPainter extends CustomPainter {
-  final ThemeNotifier theme;
-  const _MapPainter(this.theme);
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Simple grid map background
-    final bg = Paint()..color = const Color(0xFF1A1A2E);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bg);
-    final grid = Paint()..color = Colors.white.withOpacity(.05)..strokeWidth = 1;
-    for (double x = 0; x < size.width; x += 40) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
-    }
-    for (double y = 0; y < size.height; y += 40) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
-    // Campus boundary
-    final boundary = Paint()..color = Colors.white.withOpacity(.08)
-      ..strokeWidth = 2..style = PaintingStyle.stroke;
-    canvas.drawRRect(RRect.fromRectAndRadius(
-      Rect.fromLTWH(30, 30, size.width - 60, size.height - 60),
-      const Radius.circular(8)), boundary);
-    // Roads
-    final road = Paint()..color = Colors.white.withOpacity(.04)..strokeWidth = 8;
-    canvas.drawLine(Offset(size.width/2, 30), Offset(size.width/2, size.height - 30), road);
-    canvas.drawLine(Offset(30, size.height/2), Offset(size.width - 30, size.height/2), road);
-  }
-  @override bool shouldRepaint(_) => false;
+  Widget _topBtn(ThemeNotifier theme, IconData icon, String label, VoidCallback onTap) =>
+    GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+          borderRadius: BorderRadius.circular(GeoRadius.sm)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: theme.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: GoogleFonts.inter(
+            fontSize: 12, fontWeight: FontWeight.w500, color: theme.textSecondary)),
+        ])));
 }

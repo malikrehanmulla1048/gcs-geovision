@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
+import '../../services/auth_service.dart';
+import '../../services/backend_service.dart';
 import '../../widgets/admin_sidebar.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -13,104 +14,71 @@ class EntryHistoryScreen extends StatefulWidget {
   State<EntryHistoryScreen> createState() => _EntryHistoryScreenState();
 }
 
-class _EntryHistoryScreenState extends State<EntryHistoryScreen> {
-  final _rng = Random();
-  Timer? _liveTimer;
-  final List<_Row> _rows = [];
-  String _search = '';
+class _EntryHistoryScreenState extends State<EntryHistoryScreen>
+    with SingleTickerProviderStateMixin {
+  late final BackendService _backend;
+  Timer? _refreshTimer;
+  late TabController _tabCtrl;
+
+  List<dynamic> _logs      = [];
+  List<dynamic> _onCampus  = [];
+  Map<String, dynamic> _stats = {};
+  bool _loading = true;
+
+  String _search     = '';
   String _typeFilter = 'all';
   String _gateFilter = 'all';
-  int _entryCount = 247, _exitCount = 89, _deniedCount = 5;
-  double _avgConf = 96.3;
-  final List<double> _confVals = [];
 
-  static const _people = [
-    {'name': 'Arjun Kumar',    'id': 'SRN21CS001', 'dept': 'CS',    'initials': 'AK', 'color': '#dc2626,#991b1b'},
-    {'name': 'Priya Sharma',   'id': 'SRN21EC045', 'dept': 'EC',    'initials': 'PS', 'color': '#2563eb,#1e3a8a'},
-    {'name': 'Rohit Nair',     'id': 'SRN21ME012', 'dept': 'ME',    'initials': 'RN', 'color': '#16a34a,#14532d'},
-    {'name': 'Sneha Krishnan', 'id': 'STAF-005',   'dept': 'Admin', 'initials': 'SK', 'color': '#7c3aed,#4c1d95'},
-    {'name': 'Mohammed Tariq', 'id': 'SRN21IT088', 'dept': 'IT',    'initials': 'MT', 'color': '#db2777,#831843'},
-    {'name': 'Divya Menon',    'id': 'SRN22CS034', 'dept': 'CS',    'initials': 'DM', 'color': '#0891b2,#164e63'},
-    {'name': 'Kiran Reddy',    'id': 'SRN22EE021', 'dept': 'EE',    'initials': 'KR', 'color': '#d97706,#92400e'},
-    {'name': 'Ananya Pillai',  'id': 'STAF-009',   'dept': 'Admin', 'initials': 'AP', 'color': '#dc2626,#7f1d1d'},
-    {'name': 'Suresh Babu',    'id': 'SRN21CV007', 'dept': 'CV',    'initials': 'SB', 'color': '#059669,#064e3b'},
-  ];
-
-  static const _gates = ['Main Gate','East Entrance','Library','Admin Block','Sports Complex'];
+  static const _gates = ['all', 'Main Gate', 'East Entrance', 'Library', 'Admin Block', 'Sports Complex'];
 
   @override
   void initState() {
     super.initState();
-    _seed();
-    _startLive();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _backend = context.read<AuthService>().backend;
+    _loadAll();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadAll());
   }
 
   @override
-  void dispose() { _liveTimer?.cancel(); super.dispose(); }
-
-  void _seed() {
-    final seeds = [
-      ['entry',0],['entry',1],['exit',2],['entry',3],['entry',4],['exit',5],['denied',6],['entry',7],['exit',8],
-    ];
-    for (final s in seeds.reversed) {
-      _addRow(s[1] as int, s[0] as String);
-    }
+  void dispose() {
+    _tabCtrl.dispose();
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
-  void _startLive() {
-    final delay = 3500 + _rng.nextInt(4000);
-    _liveTimer = Timer(Duration(milliseconds: delay), () {
-      if (!mounted) return;
-      final idx = _rng.nextInt(_people.length);
-      final r = _rng.nextDouble();
-      final type = r < .6 ? 'entry' : r < .88 ? 'exit' : 'denied';
-      setState(() => _addRow(idx, type));
-      _startLive();
+  Future<void> _loadAll() async {
+    final results = await Future.wait([
+      _backend.getEntryLogs(typeFilter: _typeFilter, gateFilter: _gateFilter, search: _search),
+      _backend.getOnCampus(),
+      _backend.getStats(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _logs     = results[0] as List<dynamic>;
+      _onCampus = results[1] as List<dynamic>;
+      _stats    = results[2] as Map<String, dynamic>;
+      _loading  = false;
     });
   }
 
-  void _addRow(int pIdx, String type) {
-    final p = _people[pIdx % _people.length];
-    final conf = type == 'denied'
-        ? 55 + _rng.nextDouble() * 25
-        : 85 + _rng.nextDouble() * 14.9;
-    _confVals.add(conf);
-    if (_confVals.length > 30) _confVals.removeAt(0);
-    _avgConf = _confVals.reduce((a, b) => a + b) / _confVals.length;
+  Color _typeColor(String type) => switch (type) {
+    'entry'  => GeoColors.success,
+    'exit'   => const Color(0xFF6366F1),
+    'denied' => GeoColors.danger,
+    _        => GeoColors.warning,
+  };
 
-    _rows.insert(0, _Row(
-      name: p['name']!, id: p['id']!, dept: p['dept']!,
-      initials: p['initials']!, color: p['color']!,
-      gate: _gates[_rng.nextInt(_gates.length)],
-      time: DateTime.now(), type: type, conf: conf,
-    ));
-    if (_rows.length > 50) _rows.removeLast();
-
-    if (type == 'entry') _entryCount++;
-    else if (type == 'exit') _exitCount++;
-    else _deniedCount++;
-  }
-
-  List<_Row> get _filtered => _rows.where((r) {
-    final matchSearch = r.name.toLowerCase().contains(_search.toLowerCase()) ||
-        r.id.toLowerCase().contains(_search.toLowerCase());
-    final matchType = _typeFilter == 'all' || r.type == _typeFilter;
-    final matchGate = _gateFilter == 'all' || r.gate == _gateFilter;
-    return matchSearch && matchType && matchGate;
-  }).toList();
-
-  Color _hexColor(String hex) {
-    try { return Color(int.parse(hex.trim().replaceAll('#', '0xFF'))); }
-    catch (_) { return GeoColors.primary; }
-  }
-
-  String _fmtTime(DateTime d) =>
-      '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}:${d.second.toString().padLeft(2,'0')}';
+  String _typeName(String type) => switch (type) {
+    'entry'  => 'Entry',
+    'exit'   => 'Exit',
+    'denied' => 'Denied',
+    _        => type,
+  };
 
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeNotifier>();
-    final filtered = _filtered;
 
     return AdminShell(
       activeRoute: '/admin/entries',
@@ -119,9 +87,7 @@ class _EntryHistoryScreenState extends State<EntryHistoryScreen> {
       topbarActions: [
         const LiveBadge(),
         const SizedBox(width: 8),
-        _topBtn('⬇ Export CSV', theme),
-        const SizedBox(width: 8),
-        _topBtn('↺ Refresh', theme),
+        _topBtn(theme, Icons.refresh_outlined, 'Refresh', _loadAll),
       ],
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -129,145 +95,53 @@ class _EntryHistoryScreenState extends State<EntryHistoryScreen> {
           Text('Entry & Exit History', style: GoogleFonts.inter(
             fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary)),
           const SizedBox(height: 4),
-          Text('Live log of all campus gate events. Auto-updating in real-time.',
+          Text('Live log of all campus gate events. Updates every 10 seconds.',
             style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
           const SizedBox(height: 16),
 
           // Stats
           Row(children: [
-            Expanded(child: StatCard(theme: theme, icon: '→', value: '$_entryCount',
-              label: 'Total Entries', trend: '▲ 12%', trendUp: true)),
+            Expanded(child: StatCard(theme: theme, icon: '→', value: '${_stats['entries_today'] ?? 0}',
+              label: 'Entries Today', trend: 'Today', trendUp: true, iconBg: GeoColors.successGhost)),
             const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '↩', value: '$_exitCount',
-              label: 'Total Exits', trend: 'Today')),
+            Expanded(child: StatCard(theme: theme, icon: '←', value: '${_stats['exits_today'] ?? 0}',
+              label: 'Exits Today', trend: 'Today')),
             const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '🚫', value: '$_deniedCount',
-              label: 'Access Denied', trend: '▲ 2', trendUp: false,
-              iconBg: GeoColors.dangerGhost)),
+            Expanded(child: StatCard(theme: theme, icon: 'X', value: '${_stats['denied_today'] ?? 0}',
+              label: 'Access Denied', iconBg: GeoColors.dangerGhost, trendUp: false)),
             const SizedBox(width: 12),
-            Expanded(child: StatCard(theme: theme, icon: '✓',
-              value: '${_avgConf.toStringAsFixed(1)}%',
-              label: 'Avg Confidence', trend: '▲ 1.2%', trendUp: true,
-              iconBg: GeoColors.successGhost)),
+            Expanded(child: StatCard(theme: theme, icon: '%', value: '${_stats['avg_confidence'] ?? 0}%',
+              label: 'Avg Confidence', iconBg: GeoColors.successGhost, trendUp: true)),
           ]),
           const SizedBox(height: 20),
 
-          // Table
+          // Tabs
           Container(
             decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
               borderRadius: BorderRadius.circular(GeoRadius.lg)),
             child: Column(children: [
-              // Table header/filters
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                child: Row(children: [
-                  Text('📋 Live Entry Log', style: GoogleFonts.inter(
-                    fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(color: theme.bgBadge, borderRadius: BorderRadius.circular(GeoRadius.full)),
-                    child: Text('${filtered.length} records', style: GoogleFonts.inter(
-                      fontSize: 11, color: theme.textSecondary))),
-                  const Spacer(),
-                  // Search
-                  SizedBox(width: 200, child: TextField(
-                    onChanged: (v) => setState(() => _search = v),
-                    style: GoogleFonts.inter(fontSize: 12, color: theme.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: '🔍 Search name or ID…',
-                      hintStyle: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary),
-                      filled: true, fillColor: theme.bgInput,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(GeoRadius.sm),
-                        borderSide: BorderSide(color: theme.border)),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(GeoRadius.sm),
-                        borderSide: BorderSide(color: theme.border))),
-                  )),
-                  const SizedBox(width: 8),
-                  _filterDrop(theme, _typeFilter, ['all','entry','exit','denied'],
-                    ['All Types','Entry','Exit','Denied'], (v) => setState(() => _typeFilter = v!)),
-                  const SizedBox(width: 8),
-                  _filterDrop(theme, _gateFilter, ['all',..._gates],
-                    ['All Gates',..._gates], (v) => setState(() => _gateFilter = v!)),
-                ]),
-              ),
-              Divider(height: 1, color: theme.border),
-
-              // Column headers
               Container(
-                color: theme.bgBadge,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(children: [
-                  _th(theme, '#', 40),
-                  _th(theme, 'Person', 180),
-                  _th(theme, 'Dept', 80),
-                  _th(theme, 'Gate', 130),
-                  _th(theme, 'Time', 90),
-                  _th(theme, 'Type', 90),
-                  _th(theme, 'Conf.', 70),
-                  _th(theme, 'Action', 90),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+                child: TabBar(
+                  controller: _tabCtrl,
+                  indicatorColor: GeoColors.primary,
+                  labelColor: GeoColors.primary,
+                  unselectedLabelColor: theme.textTertiary,
+                  labelStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700),
+                  unselectedLabelStyle: GoogleFonts.inter(fontSize: 13),
+                  tabs: [
+                    Tab(text: 'Entry Log (${_logs.length})'),
+                    Tab(text: 'On Campus (${_onCampus.length})'),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: 600,
+                child: TabBarView(controller: _tabCtrl, children: [
+                  _buildEntryLog(theme),
+                  _buildOnCampus(theme),
                 ]),
               ),
-              Divider(height: 2, color: theme.border),
-
-              // Rows
-              ...filtered.asMap().entries.map((e) {
-                final r = e.value;
-                final colors = r.color.split(',');
-                final conf = r.conf;
-                final confColor = r.type == 'denied' ? GeoColors.danger
-                    : conf >= 90 ? GeoColors.success
-                    : conf >= 75 ? GeoColors.warning : GeoColors.danger;
-                return Container(
-                  decoration: BoxDecoration(border: Border(
-                    bottom: BorderSide(color: theme.border))),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(children: [
-                      SizedBox(width: 40, child: Text(
-                        (filtered.length - e.key).toString().padLeft(3, '0'),
-                        style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary, fontWeight: FontWeight.w600))),
-                      SizedBox(width: 180, child: Row(children: [
-                        AvatarCircle(initials: r.initials, size: 34, fontSize: 11,
-                          gradient: [_hexColor(colors[0]), _hexColor(colors.length > 1 ? colors[1] : colors[0])]),
-                        const SizedBox(width: 10),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(r.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary), overflow: TextOverflow.ellipsis),
-                          Text(r.id, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
-                        ])),
-                      ])),
-                      SizedBox(width: 80, child: Text(r.dept, style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary))),
-                      SizedBox(width: 130, child: Text('📍 ${r.gate}', style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
-                      SizedBox(width: 90, child: Text(_fmtTime(r.time), style: GoogleFonts.inter(fontSize: 13, color: theme.textPrimary))),
-                      SizedBox(width: 90, child: _typeBadge(theme, r.type)),
-                      SizedBox(width: 70, child: Text('${conf.toStringAsFixed(1)}%', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: confColor))),
-                      SizedBox(width: 90, child: GestureDetector(
-                        onTap: () {},
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: GeoColors.primaryGhost),
-                            borderRadius: BorderRadius.circular(GeoRadius.sm)),
-                          child: Text('View Profile', style: GoogleFonts.inter(
-                            fontSize: 11, fontWeight: FontWeight.w600, color: GeoColors.primary))))),
-                    ]),
-                  ),
-                );
-              }),
-
-              // Footer
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                child: Row(children: [
-                  Text('Showing latest ${filtered.length} entries',
-                    style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
-                  const Spacer(),
-                  Text('Total: ${_rows.length} records',
-                    style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
-                ])),
             ]),
           ),
         ]),
@@ -275,29 +149,207 @@ class _EntryHistoryScreenState extends State<EntryHistoryScreen> {
     );
   }
 
-  Widget _th(ThemeNotifier theme, String label, double w) => SizedBox(
-    width: w,
-    child: Text(label.toUpperCase(), style: GoogleFonts.inter(
-      fontSize: 11, fontWeight: FontWeight.w700,
-      color: theme.textTertiary, letterSpacing: .6)));
+  Widget _buildEntryLog(ThemeNotifier theme) => Column(children: [
+    // Filters
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(children: [
+        // Search
+        Expanded(child: TextField(
+          onChanged: (v) { setState(() { _search = v; _loading = true; }); _loadAll(); },
+          style: GoogleFonts.inter(fontSize: 12, color: theme.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Search name or ID...',
+            hintStyle: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary),
+            prefixIcon: Icon(Icons.search, size: 16, color: theme.textTertiary),
+            filled: true, fillColor: theme.bgInput,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(GeoRadius.sm),
+              borderSide: BorderSide(color: theme.border)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(GeoRadius.sm),
+              borderSide: BorderSide(color: theme.border))),
+        )),
+        const SizedBox(width: 8),
+        _filterDrop(theme, _typeFilter, ['all','entry','exit','denied'],
+          ['All Types','Entry','Exit','Denied'],
+          (v) { setState(() { _typeFilter = v!; _loading = true; }); _loadAll(); }),
+        const SizedBox(width: 8),
+        _filterDrop(theme, _gateFilter, _gates, ['All Gates', ..._gates.skip(1)],
+          (v) { setState(() { _gateFilter = v!; _loading = true; }); _loadAll(); }),
+      ]),
+    ),
+    Divider(height: 1, color: theme.border),
 
-  Widget _typeBadge(ThemeNotifier theme, String type) {
-    Color bg, fg;
-    String label;
-    if (type == 'entry') { bg = GeoColors.successGhost; fg = const Color(0xFF16A34A); label = '→ Entry'; }
-    else if (type == 'exit') { bg = const Color(0x1A6366F1); fg = const Color(0xFF6366F1); label = '↩ Exit'; }
-    else { bg = GeoColors.dangerGhost; fg = GeoColors.danger; label = '🚫 Denied'; }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(GeoRadius.full)),
-      child: Text(label, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: fg)));
+    // Table header
+    Container(
+      color: theme.bgBadge,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(children: [
+        _th(theme, '#',      40),
+        _th(theme, 'Person', 180),
+        _th(theme, 'Dept',   80),
+        _th(theme, 'Gate',   130),
+        _th(theme, 'Time',   90),
+        _th(theme, 'Type',   90),
+        _th(theme, 'Conf.',  70),
+      ])),
+    Divider(height: 2, color: theme.border),
+
+    // Rows
+    _loading
+        ? const Expanded(child: Center(child: CircularProgressIndicator(color: GeoColors.primary)))
+        : _logs.isEmpty
+            ? Expanded(child: Center(child: Text('No entries found.',
+                style: GoogleFonts.inter(fontSize: 13, color: theme.textTertiary))))
+            : Expanded(child: ListView.builder(
+                itemCount: _logs.length,
+                itemBuilder: (_, i) {
+                  final e    = _logs[i] as Map<String, dynamic>;
+                  final name = e['user_name'] as String? ?? 'Unknown';
+                  final id   = e['user_id']  as String? ?? '';
+                  final dept = e['dept']     as String? ?? '';
+                  final gate = e['gate']     as String? ?? '';
+                  final type = e['type']     as String? ?? 'entry';
+                  final conf = (e['confidence'] as num?)?.toDouble() ?? 0;
+                  final ts   = e['timestamp'] as String? ?? '';
+                  final timeFmt = ts.isNotEmpty
+                      ? () { final d = DateTime.parse(ts).toLocal();
+                          return '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}:${d.second.toString().padLeft(2,'0')}'; }()
+                      : '--:--:--';
+                  final initials = name.trim().split(' ').where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
+                  final typeColor  = _typeColor(type);
+                  final confColor  = type == 'denied' ? GeoColors.danger
+                      : conf >= 90 ? GeoColors.success : conf >= 75 ? GeoColors.warning : GeoColors.danger;
+
+                  return Container(
+                    decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                      child: Row(children: [
+                        SizedBox(width: 40, child: Text(
+                          (i + 1).toString().padLeft(3, '0'),
+                          style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary,
+                            fontWeight: FontWeight.w600))),
+                        SizedBox(width: 180, child: Row(children: [
+                          Container(
+                            width: 34, height: 34,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: GeoColors.avatarGradients[name.hashCode.abs() % GeoColors.avatarGradients.length],
+                                begin: Alignment.topLeft, end: Alignment.bottomRight)),
+                            child: Center(child: Text(initials, style: GoogleFonts.inter(
+                              fontSize: 11, fontWeight: FontWeight.w800, color: Colors.white)))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600,
+                              color: theme.textPrimary), overflow: TextOverflow.ellipsis),
+                            Text(id, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+                          ])),
+                        ])),
+                        SizedBox(width: 80, child: Text(dept, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
+                        SizedBox(width: 130, child: Text(gate, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary), overflow: TextOverflow.ellipsis)),
+                        SizedBox(width: 90, child: Text(timeFmt, style: GoogleFonts.inter(
+                          fontSize: 12, color: theme.textPrimary))),
+                        SizedBox(width: 90, child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(color: typeColor.withOpacity(.1),
+                            borderRadius: BorderRadius.circular(GeoRadius.full)),
+                          child: Text(_typeName(type), style: GoogleFonts.inter(
+                            fontSize: 11, fontWeight: FontWeight.w700, color: typeColor)))),
+                        SizedBox(width: 70, child: Text('${conf.toStringAsFixed(1)}%',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: confColor))),
+                      ]),
+                    ),
+                  );
+                },
+              )),
+
+    // Footer
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(children: [
+        Text('Showing ${_logs.length} records',
+          style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
+      ])),
+  ]);
+
+  Widget _buildOnCampus(ThemeNotifier theme) {
+    if (_onCampus.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.people_outline, size: 40, color: GeoColors.success),
+      const SizedBox(height: 12),
+      Text('No one currently on campus.', style: GoogleFonts.inter(
+        fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+    ]));
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _onCampus.length,
+      itemBuilder: (_, i) {
+        final u    = _onCampus[i] as Map<String, dynamic>;
+        final name = u['user_name'] as String? ?? 'Unknown';
+        final id   = u['user_id']  as String? ?? '';
+        final dept = u['dept']     as String? ?? '';
+        final gate = u['gate']     as String? ?? '';
+        final initials = name.trim().split(' ').where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(color: theme.bgBadge,
+              borderRadius: BorderRadius.circular(GeoRadius.md),
+              border: Border.all(color: theme.border)),
+            child: Row(children: [
+              Container(
+                width: 38, height: 38,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: GeoColors.avatarGradients[name.hashCode.abs() % GeoColors.avatarGradients.length],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight)),
+                child: Center(child: Text(initials, style: GoogleFonts.inter(
+                  fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)))),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: GoogleFonts.inter(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+                Text('$id${dept.isNotEmpty ? " · $dept" : ""}',
+                  style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+              ])),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Container(width: 8, height: 8,
+                  decoration: const BoxDecoration(color: GeoColors.success, shape: BoxShape.circle)),
+                const SizedBox(height: 4),
+                Text(gate, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+              ]),
+            ]),
+          ));
+      },
+    );
   }
 
-  Widget _topBtn(String label, ThemeNotifier theme) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-    decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
-      borderRadius: BorderRadius.circular(GeoRadius.sm)),
-    child: Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: theme.textSecondary)));
+  Widget _th(ThemeNotifier theme, String label, double w) => SizedBox(width: w,
+    child: Text(label.toUpperCase(), style: GoogleFonts.inter(
+      fontSize: 11, fontWeight: FontWeight.w700, color: theme.textTertiary, letterSpacing: .6)));
+
+  Widget _topBtn(ThemeNotifier theme, IconData icon, String label, VoidCallback onTap) =>
+    GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+          borderRadius: BorderRadius.circular(GeoRadius.sm)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: theme.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500,
+            color: theme.textSecondary)),
+        ])));
 
   Widget _filterDrop(ThemeNotifier theme, String value, List<String> vals,
       List<String> labels, ValueChanged<String?> onChanged) =>
@@ -309,13 +361,4 @@ class _EntryHistoryScreenState extends State<EntryHistoryScreen> {
       items: List.generate(vals.length, (i) =>
         DropdownMenuItem(value: vals[i], child: Text(labels[i]))),
       onChanged: onChanged);
-}
-
-class _Row {
-  final String name, id, dept, initials, color, gate, type;
-  final DateTime time;
-  final double conf;
-  const _Row({required this.name, required this.id, required this.dept,
-    required this.initials, required this.color, required this.gate,
-    required this.time, required this.type, required this.conf});
 }

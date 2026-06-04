@@ -4,11 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/auth_service.dart';
-import '../../services/db_service.dart';
-import '../../models/entry_log.dart';
 import '../../widgets/common_widgets.dart';
 
-// ── USER SHELL (topbar + bottom nav) ────────────────────────────────────
+// ── USER SHELL (topbar + nav) ────────────────────────────────────────
 class UserShell extends StatelessWidget {
   final int activeIndex; // 0=Profile, 1=Entries, 2=FaceID
   final Widget body;
@@ -38,50 +36,50 @@ class UserShell extends StatelessWidget {
                 ]))),
             ),
             const Spacer(),
-            GestureDetector(
-              onTap: () => context.read<ThemeNotifier>().toggle(),
-              child: Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(color: theme.bgBadge, shape: BoxShape.circle),
-                child: Center(child: Text(theme.isDark ? '☀️' : '🌙',
-                  style: const TextStyle(fontSize: 16))),
-              ),
+            IconButton(
+              icon: Icon(theme.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                color: theme.textSecondary),
+              onPressed: () => context.read<ThemeNotifier>().toggle(),
             ),
           ]),
         ),
         Divider(height: 1, color: theme.border),
 
-        // Desktop nav (visible on wide)
+        // Desktop nav
         if (MediaQuery.of(context).size.width > 600)
           Container(
             color: theme.bgCard,
             child: Row(children: [
-              _navItem(context, theme, '🙍 Profile', '/user/profile',     activeIndex == 0),
-              _navItem(context, theme, '🚪 My Entries', '/user/entries',  activeIndex == 1),
-              _navItem(context, theme, '🤳 Face Enrolment', '/user/face-enrol', activeIndex == 2),
+              _navItem(context, theme, Icons.person_outline, 'Profile',      '/user/profile',     activeIndex == 0),
+              _navItem(context, theme, Icons.history,         'My Entries',  '/user/entries',     activeIndex == 1),
+              _navItem(context, theme, Icons.face_retouching_natural, 'Face Enrolment', '/user/face-enrol', activeIndex == 2),
             ]),
           ),
 
         Expanded(child: body),
       ]),
 
-      // Bottom nav (visible on narrow)
+      // Mobile bottom nav
       bottomNavigationBar: MediaQuery.of(context).size.width <= 600
           ? _buildBottomNav(context, theme)
           : null,
     );
   }
 
-  Widget _navItem(BuildContext context, ThemeNotifier theme, String label, String route, bool active) =>
+  Widget _navItem(BuildContext context, ThemeNotifier theme, IconData icon, String label, String route, bool active) =>
     GestureDetector(
       onTap: () => context.go(route),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         decoration: active ? BoxDecoration(
           border: Border(bottom: BorderSide(color: GeoColors.primary, width: 2))) : null,
-        child: Text(label, style: GoogleFonts.inter(
-          fontSize: 13, fontWeight: FontWeight.w600,
-          color: active ? GeoColors.primary : theme.textSecondary)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: active ? GeoColors.primary : theme.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: GoogleFonts.inter(
+            fontSize: 13, fontWeight: FontWeight.w600,
+            color: active ? GeoColors.primary : theme.textSecondary)),
+        ]),
       ));
 
   Widget _buildBottomNav(BuildContext context, ThemeNotifier theme) => Container(
@@ -89,20 +87,20 @@ class UserShell extends StatelessWidget {
       color: theme.bgCard,
       border: Border(top: BorderSide(color: theme.border))),
     child: SafeArea(child: Row(children: [
-      _bottomItem(context, theme, '🙍', 'Profile',  '/user/profile',      activeIndex == 0),
-      _bottomItem(context, theme, '🚪', 'Entries',  '/user/entries',      activeIndex == 1),
-      _bottomItem(context, theme, '🤳', 'Face ID',  '/user/face-enrol',   activeIndex == 2),
+      _bottomItem(context, theme, Icons.person_outline,            'Profile',  '/user/profile',  activeIndex == 0),
+      _bottomItem(context, theme, Icons.history,                   'Entries',  '/user/entries',  activeIndex == 1),
+      _bottomItem(context, theme, Icons.face_retouching_natural,  'Face ID',  '/user/face-enrol', activeIndex == 2),
       _bottomLogout(context, theme),
     ])));
 
-  Widget _bottomItem(BuildContext context, ThemeNotifier theme, String icon, String label,
+  Widget _bottomItem(BuildContext context, ThemeNotifier theme, IconData icon, String label,
       String route, bool active) =>
     Expanded(child: GestureDetector(
       onTap: () => context.go(route),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(icon, style: const TextStyle(fontSize: 20)),
+          Icon(icon, size: 22, color: active ? GeoColors.primary : theme.textTertiary),
           const SizedBox(height: 2),
           Text(label, style: GoogleFonts.inter(
             fontSize: 10, fontWeight: FontWeight.w600,
@@ -119,7 +117,7 @@ class UserShell extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('🚪', style: TextStyle(fontSize: 20)),
+          Icon(Icons.logout, size: 22, color: theme.textTertiary),
           const SizedBox(height: 2),
           Text('Logout', style: GoogleFonts.inter(
             fontSize: 10, fontWeight: FontWeight.w600, color: theme.textTertiary)),
@@ -127,7 +125,7 @@ class UserShell extends StatelessWidget {
     ));
 }
 
-// ── USER PROFILE SCREEN ──────────────────────────────────────────────────
+// ── USER PROFILE SCREEN ──────────────────────────────────────────────
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key});
   @override
@@ -135,68 +133,67 @@ class UserProfileScreen extends StatefulWidget {
 }
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
-  final _db = DbService();
-  bool _editOpen = false;
-  List<EntryLog> _logs = [];
-  int _entryCount = 0, _daysSince = 0;
+  bool _editOpen    = false;
+  bool _loading     = true;
+  int  _entryCount  = 0;
+  int  _daysSince   = 0;
 
   // Edit fields
   final _nameCtrl  = TextEditingController();
   final _phoneCtrl = TextEditingController();
   String _editDept = '', _editYear = '';
+  bool _saving = false;
 
   @override
-  void initState() {
-    super.initState();
-    _loadEntries();
-  }
+  void initState() { super.initState(); _loadData(); }
 
   @override
-  void dispose() {
-    _nameCtrl.dispose(); _phoneCtrl.dispose(); super.dispose();
-  }
+  void dispose() { _nameCtrl.dispose(); _phoneCtrl.dispose(); super.dispose(); }
 
-  Future<void> _loadEntries() async {
+  Future<void> _loadData() async {
     final auth = context.read<AuthService>();
-    final user = auth.currentUser;
-    if (user == null) return;
+    final email = auth.userEmail;
+    if (email == null) return;
     try {
-      final userLogs = await _db.getEntryLogsByUser(user.email);
-      final allLogs  = await _db.getAllEntryLogs();
-      final display  = userLogs.isNotEmpty ? userLogs : allLogs.take(5).toList();
-      final days     = user.joinedAt != null
-          ? DateTime.now().difference(user.joinedAt!).inDays : 0;
+      final logs = await auth.backend.getUserEntryLogs(email);
+      final user = auth.userData;
+      final days = user?['joined_at'] != null
+          ? DateTime.now().difference(DateTime.parse(user!['joined_at'] as String)).inDays
+          : 0;
       if (mounted) setState(() {
-        _logs = display; _entryCount = display.length; _daysSince = days;
+        _entryCount = logs.length;
+        _daysSince  = days;
+        _loading    = false;
       });
-    } catch (e) { debugPrint('$e'); }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _openEdit() {
-    final user = context.read<AuthService>().currentUser!;
-    _nameCtrl.text  = user.name;
-    _phoneCtrl.text = user.phone ?? '';
-    _editDept = user.dept ?? '';
-    _editYear = user.year ?? '';
+    final user = context.read<AuthService>().userData!;
+    _nameCtrl.text  = user['name'] ?? '';
+    _phoneCtrl.text = user['phone'] ?? '';
+    _editDept = user['dept'] ?? '';
+    _editYear = user['year'] ?? '';
     setState(() => _editOpen = true);
   }
 
   Future<void> _saveProfile() async {
-    final auth = context.read<AuthService>();
-    final user = auth.currentUser!;
     if (_nameCtrl.text.trim().isEmpty) {
       GeoToast.show(context, 'Please enter your name.', type: 'error');
       return;
     }
-    await auth.updateProfile(user.copyWith(
+    setState(() => _saving = true);
+    await context.read<AuthService>().updateProfile(
       name: _nameCtrl.text.trim(),
       phone: _phoneCtrl.text.trim(),
       dept: _editDept,
       year: _editYear,
-    ));
+    );
     if (mounted) {
-      setState(() => _editOpen = false);
-      GeoToast.show(context, '✅ Profile updated!', type: 'success');
+      setState(() { _editOpen = false; _saving = false; });
+      GeoToast.show(context, 'Profile updated.', type: 'success');
     }
   }
 
@@ -204,12 +201,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeNotifier>();
     final auth  = context.watch<AuthService>();
-    final user  = auth.currentUser;
+    final user  = auth.userData;
 
     if (user == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => context.go('/'));
       return const SizedBox();
     }
+
+    final name      = user['name'] as String? ?? 'User';
+    final email     = user['email'] as String? ?? '';
+    final dept      = user['dept'] as String? ?? '';
+    final year      = user['year'] as String? ?? '';
+    final studentId = user['student_id'] as String? ?? '';
+    final phone     = user['phone'] as String? ?? '';
+    final enrolled  = user['face_enrolled'] == true;
+    final joinedAt  = user['joined_at'] as String?;
+    final initials  = name.trim().split(' ')
+        .where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
 
     return UserShell(
       activeIndex: 0,
@@ -225,50 +233,53 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               child: Column(children: [
                 // Avatar
                 Stack(children: [
-                  user.pfp != null
-                      ? CircleAvatar(radius: 45, backgroundImage: AssetImage(user.pfp!))
-                      : Container(
-                          width: 90, height: 90,
-                          decoration: const BoxDecoration(shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Color(0xFFEF4444), Color(0xFF991B1B)],
-                              begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                          child: Center(child: Text(user.initials, style: GoogleFonts.inter(
-                            fontSize: 28, fontWeight: FontWeight.w800, color: Colors.white)))),
+                  Container(
+                    width: 90, height: 90,
+                    decoration: const BoxDecoration(shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [Color(0xFFEF4444), Color(0xFF991B1B)],
+                        begin: Alignment.topLeft, end: Alignment.bottomRight)),
+                    child: Center(child: Text(initials, style: GoogleFonts.inter(
+                      fontSize: 28, fontWeight: FontWeight.w800, color: Colors.white)))),
                   Positioned(bottom: 0, right: 0, child: GestureDetector(
                     onTap: _openEdit,
                     child: Container(
                       width: 28, height: 28,
                       decoration: BoxDecoration(color: GeoColors.primary, shape: BoxShape.circle,
                         border: Border.all(color: theme.bgCard, width: 2)),
-                      child: const Center(child: Text('✏️', style: TextStyle(fontSize: 12)))))),
+                      child: const Center(child: Icon(Icons.edit, size: 13, color: Colors.white))))),
                 ]),
                 const SizedBox(height: 12),
-                Text(user.name, style: GoogleFonts.inter(
+                Text(name, style: GoogleFonts.inter(
                   fontSize: 20, fontWeight: FontWeight.w800, color: theme.textPrimary)),
-                Text('${user.dept ?? "GeoVision Campus"} • ${user.year ?? "Student"}',
-                  style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
+                if (dept.isNotEmpty || year.isNotEmpty)
+                  Text('$dept${dept.isNotEmpty && year.isNotEmpty ? " — " : ""}$year',
+                    style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
                 const SizedBox(height: 12),
                 // Badges
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  _badge(theme, '🪪 ${user.studentId ?? "N/A"}'),
-                  const SizedBox(width: 8),
-                  user.faceEnrolled
-                      ? _enrolledBadge()
-                      : _pendingBadge(),
+                  if (studentId.isNotEmpty) ...[
+                    _badge(theme, studentId, Icons.badge_outlined),
+                    const SizedBox(width: 8),
+                  ],
+                  enrolled
+                    ? _statusBadge(GeoColors.successGhost, GeoColors.success, Icons.check_circle_outline, 'Face Enrolled')
+                    : _statusBadge(GeoColors.warningGhost, GeoColors.warning, Icons.pending_outlined, 'Face Pending'),
                 ]),
               ]),
             ),
             const SizedBox(height: 16),
 
-            // Stats chips
-            Row(children: [
-              Expanded(child: _statChip(theme, '$_entryCount', 'Entries')),
-              const SizedBox(width: 12),
-              Expanded(child: _statChip(theme, user.faceEnrolled ? '✓' : '✗', 'Face ID')),
-              const SizedBox(width: 12),
-              Expanded(child: _statChip(theme, '$_daysSince', 'Days Since')),
-            ]),
+            // Stats
+            _loading
+              ? const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())
+              : Row(children: [
+                  Expanded(child: _statChip(theme, '$_entryCount', 'Entries')),
+                  const SizedBox(width: 12),
+                  Expanded(child: _statChip(theme, enrolled ? 'Active' : 'Pending', 'Face ID')),
+                  const SizedBox(width: 12),
+                  Expanded(child: _statChip(theme, '$_daysSince', 'Days Since')),
+                ]),
             const SizedBox(height: 20),
 
             // Personal info
@@ -277,12 +288,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
                 borderRadius: BorderRadius.circular(GeoRadius.lg)),
               child: Column(children: [
-                _infoRow(theme, '📧', 'Email', user.email),
-                _infoRow(theme, '📱', 'Phone', user.phone ?? '—'),
-                _infoRow(theme, '🏫', 'Department', user.dept ?? '—'),
-                _infoRow(theme, '📅', 'Year', user.year ?? '—'),
-                _infoRow(theme, '🗓', 'Registered',
-                  user.joinedAt != null ? _fmtDate(user.joinedAt!) : '—', last: true),
+                _infoRow(theme, Icons.email_outlined,   'Email',       email),
+                _infoRow(theme, Icons.phone_outlined,   'Phone',       phone.isEmpty ? '—' : phone),
+                _infoRow(theme, Icons.school_outlined,  'Department',  dept.isEmpty ? '—' : dept),
+                _infoRow(theme, Icons.calendar_today_outlined, 'Year', year.isEmpty ? '—' : year),
+                _infoRow(theme, Icons.event_outlined,   'Registered',
+                  joinedAt != null ? _fmtDate(DateTime.parse(joinedAt)) : '—', last: true),
               ]),
             ),
             const SizedBox(height: 20),
@@ -294,35 +305,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
                 borderRadius: BorderRadius.circular(GeoRadius.lg)),
               child: Column(children: [
-                GeoButton(label: '✏️ Edit Profile', onPressed: _openEdit),
+                _actionButton(theme, Icons.edit_outlined, 'Edit Profile', _openEdit),
                 const SizedBox(height: 10),
-                GeoButton(
-                  label: '🤳 ${user.faceEnrolled ? "Re-enrol" : "Enrol"} Face Data',
-                  onPressed: () => context.go('/user/face-enrol'),
-                  outline: true),
+                _actionButton(theme, Icons.face_retouching_natural,
+                  enrolled ? 'Re-enrol Face Data' : 'Enrol Face Data',
+                  () => context.go('/user/face-enrol'), outline: true),
                 const SizedBox(height: 10),
-                GeoButton(
-                  label: '🚪 Sign Out',
-                  onPressed: () async {
+                _actionButton(theme, Icons.logout, 'Sign Out',
+                  () async {
                     await context.read<AuthService>().logout();
                     if (mounted) context.go('/');
-                  },
-                  outline: true, danger: true),
+                  }, outline: true, danger: true),
               ])),
-            const SizedBox(height: 20),
-
-            // Recent entries
-            _sectionTitle(theme, 'Recent Campus Entries'),
-            Container(
-              decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
-                borderRadius: BorderRadius.circular(GeoRadius.lg)),
-              child: _logs.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Center(child: Text('No entry records yet.',
-                        style: GoogleFonts.inter(fontSize: 13, color: theme.textTertiary))))
-                  : Column(children: _logs.take(6).map((e) => _entryRow(theme, e)).toList()),
-            ),
             const SizedBox(height: 80),
           ]),
         ),
@@ -365,10 +359,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 ['1st Year','2nd Year','3rd Year','4th Year','PG / Faculty'],
                 (v) => setState(() => _editYear = v!)),
               const SizedBox(height: 20),
-              GeoButton(label: '💾 Save Changes', onPressed: _saveProfile),
+              SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                icon: _saving ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.save_outlined, size: 16),
+                label: Text(_saving ? 'Saving...' : 'Save Changes'),
+                onPressed: _saving ? null : _saveProfile,
+              )),
               const SizedBox(height: 10),
-              GeoButton(label: 'Cancel', onPressed: () => setState(() => _editOpen = false),
-                outline: true),
+              SizedBox(width: double.infinity, child: OutlinedButton(
+                onPressed: () => setState(() => _editOpen = false),
+                child: const Text('Cancel'),
+              )),
             ])),
           ),
         ),
@@ -410,23 +412,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         onChanged: onChanged),
     ]);
 
-  Widget _badge(ThemeNotifier theme, String label) => Container(
+  Widget _badge(ThemeNotifier theme, String label, IconData icon) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
     decoration: BoxDecoration(color: theme.bgBadge, borderRadius: BorderRadius.circular(GeoRadius.full)),
-    child: Text(label, style: GoogleFonts.inter(
-      fontSize: 12, fontWeight: FontWeight.w600, color: theme.textSecondary)));
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: theme.textSecondary),
+      const SizedBox(width: 5),
+      Text(label, style: GoogleFonts.inter(
+        fontSize: 12, fontWeight: FontWeight.w600, color: theme.textSecondary)),
+    ]));
 
-  Widget _enrolledBadge() => Container(
+  Widget _statusBadge(Color bg, Color fg, IconData icon, String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-    decoration: BoxDecoration(color: GeoColors.successGhost, borderRadius: BorderRadius.circular(GeoRadius.full)),
-    child: Text('✅ Face Enrolled', style: GoogleFonts.inter(
-      fontSize: 12, fontWeight: FontWeight.w600, color: GeoColors.success)));
-
-  Widget _pendingBadge() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-    decoration: BoxDecoration(color: GeoColors.warningGhost, borderRadius: BorderRadius.circular(GeoRadius.full)),
-    child: Text('⏳ Face Pending', style: GoogleFonts.inter(
-      fontSize: 12, fontWeight: FontWeight.w600, color: GeoColors.warning)));
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(GeoRadius.full)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: fg),
+      const SizedBox(width: 5),
+      Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+    ]));
 
   Widget _statChip(ThemeNotifier theme, String val, String label) => Container(
     padding: const EdgeInsets.all(16),
@@ -434,7 +437,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       borderRadius: BorderRadius.circular(GeoRadius.lg)),
     child: Column(children: [
       Text(val, style: GoogleFonts.inter(
-        fontSize: 24, fontWeight: FontWeight.w800, color: theme.textPrimary)),
+        fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary)),
       Text(label, style: GoogleFonts.inter(fontSize: 12, color: theme.textSecondary)),
     ]));
 
@@ -444,12 +447,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       child: Text(title, style: GoogleFonts.inter(
         fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary))));
 
-  Widget _infoRow(ThemeNotifier theme, String icon, String label, String value, {bool last = false}) =>
+  Widget _infoRow(ThemeNotifier theme, IconData icon, String label, String value,
+      {bool last = false}) =>
     Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: theme.border))),
       child: Row(children: [
-        Text(icon, style: const TextStyle(fontSize: 18)),
+        Icon(icon, size: 18, color: theme.textTertiary),
         const SizedBox(width: 12),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
@@ -458,36 +462,35 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ]),
       ]));
 
-  Widget _entryRow(ThemeNotifier theme, EntryLog e) {
-    final isEntry = e.type != 'exit';
-    final color   = isEntry ? GeoColors.success : const Color(0xFF6366F1);
-    final time    = '${e.timestamp.day} ${_month(e.timestamp.month)}, ${e.timestamp.hour.toString().padLeft(2,"0")}:${e.timestamp.minute.toString().padLeft(2,"0")}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
-      child: Row(children: [
-        Container(width: 10, height: 10, margin: const EdgeInsets.only(right: 12),
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('📍 ${e.gate}', style: GoogleFonts.inter(
-            fontSize: 13, fontWeight: FontWeight.w600, color: theme.textPrimary)),
-          Text(time, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
-        ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-          decoration: BoxDecoration(color: color.withOpacity(.1), borderRadius: BorderRadius.circular(GeoRadius.full)),
-          child: Text(e.typeLabel, style: GoogleFonts.inter(
-            fontSize: 11, fontWeight: FontWeight.w600, color: color))),
-      ]));
+  Widget _actionButton(ThemeNotifier theme, IconData icon, String label, VoidCallback onTap,
+      {bool outline = false, bool danger = false}) {
+    if (!outline) {
+      return SizedBox(width: double.infinity, child: ElevatedButton.icon(
+        icon: Icon(icon, size: 16),
+        label: Text(label),
+        onPressed: onTap,
+      ));
+    }
+    if (danger) {
+      return SizedBox(width: double.infinity, child: OutlinedButton.icon(
+        icon: Icon(icon, size: 16, color: GeoColors.danger),
+        label: Text(label, style: const TextStyle(color: GeoColors.danger)),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: GeoColors.danger),
+          foregroundColor: GeoColors.danger,
+        ),
+        onPressed: onTap,
+      ));
+    }
+    return SizedBox(width: double.infinity, child: OutlinedButton.icon(
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+      onPressed: onTap,
+    ));
   }
 
   String _fmtDate(DateTime d) {
     const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return '${d.day} ${months[d.month-1]} ${d.year}';
-  }
-
-  String _month(int m) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return months[m - 1];
   }
 }

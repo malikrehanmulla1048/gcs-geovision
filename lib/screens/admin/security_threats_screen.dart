@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../theme/app_theme.dart';
+import '../../services/auth_service.dart';
+import '../../services/backend_service.dart';
 import '../../widgets/admin_sidebar.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -14,127 +15,65 @@ class SecurityThreatsScreen extends StatefulWidget {
 }
 
 class _SecurityThreatsScreenState extends State<SecurityThreatsScreen> {
-  final _rng = Random();
-  Timer? _simTimer;
-  _ThreatItem? _selected;
-  List<_ThreatItem> _threats = [];
+  late final BackendService _backend;
+  Timer? _refreshTimer;
 
-  static const _templates = [
-    ['🚫', 'Unknown face detected', 'Unauthorized Access'],
-    ['🚷', 'Blacklisted individual spotted', 'Blacklisted Individual'],
-    ['🚶', 'Tailgating detected', 'Tailgating'],
-    ['📵', 'Curfew violation', 'Curfew Breach'],
-    ['🔍', 'Low confidence match', 'Low Confidence Scan'],
-  ];
-
-  static const _templateGates = [
-    ['North Gate', 'East Entrance', 'Main Gate'],
-    ['East Entrance', 'Admin Block', 'Library'],
-    ['Library Entrance', 'Lab Block', 'Cafeteria'],
-    ['Hostel Block A', 'Block D', 'Sports Complex'],
-    ['Main Gate', 'North Gate', 'East Entrance'],
-  ];
-
-  static const _guards = [
-    {
-      'name': 'Rajan Kumar',
-      'id': 'GRD-001',
-      'zone': 'North Campus',
-      'init': 'RK',
-      'eta': '~2 min'
-    },
-    {
-      'name': 'Suresh Patil',
-      'id': 'GRD-002',
-      'zone': 'East Zone',
-      'init': 'SP',
-      'eta': '~4 min'
-    },
-    {
-      'name': 'Vikram Singh',
-      'id': 'GRD-003',
-      'zone': 'Main Gate',
-      'init': 'VS',
-      'eta': '~1 min'
-    },
-  ];
-
-  static const _pieData = [
-    ['Unauthorized Access', '#dc2626', 2],
-    ['Tailgating', '#f59e0b', 2],
-    ['Low Confidence', '#6366f1', 2],
-    ['Blacklisted', '#7c3aed', 1],
-    ['Curfew Breach', '#0891b2', 1],
-  ];
+  List<dynamic> _threats = [];
+  Map<String, dynamic>? _selected;
+  bool _loading = true;
+  String _statusFilter = 'active';
 
   @override
   void initState() {
     super.initState();
-    _threats = [
-      _make(0, 'Critical', 'Active'),
-      _make(1, 'Critical', 'Active'),
-      _make(2, 'Medium', 'Resolving'),
-      _make(3, 'High', 'Resolving'),
-      _make(4, 'Low', 'Active'),
-    ];
-    _startSim();
+    _backend = context.read<AuthService>().backend;
+    _load();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
 
   @override
-  void dispose() {
-    _simTimer?.cancel();
-    super.dispose();
-  }
+  void dispose() { _refreshTimer?.cancel(); super.dispose(); }
 
-  _ThreatItem _make(int tpl, String sev, String status) {
-    final gates = _templateGates[tpl % _templateGates.length];
-    return _ThreatItem(
-      icon: _templates[tpl][0],
-      title: _templates[tpl][1],
-      type: _templates[tpl][2],
-      gate: gates[_rng.nextInt(gates.length)],
-      severity: sev,
-      status: status,
-      time: DateTime.now(),
+  Future<void> _load() async {
+    final threats = await _backend.getThreats(
+      status: _statusFilter == 'all' ? null : _statusFilter,
     );
+    if (!mounted) return;
+    setState(() { _threats = threats; _loading = false; });
   }
 
-  void _startSim() {
-    final delay = 12000 + _rng.nextInt(15000);
-    _simTimer = Timer(Duration(milliseconds: delay), () {
-      if (!mounted) return;
-      final tpl = _rng.nextInt(_templates.length);
-      final severities = ['Low', 'Medium', 'High', 'Critical'];
-      final sev = severities[_rng.nextInt(severities.length)];
-      setState(() {
-        _threats.insert(0, _make(tpl, sev, 'Active'));
-        if (_threats.length > 15) _threats.removeLast();
-      });
-      _startSim();
-    });
+  Future<void> _resolve(int id) async {
+    await _backend.resolveThreat(id);
+    _load();
+    GeoToast.show(context, 'Threat marked as resolved.', type: 'success');
   }
 
-  Color _hexColor(String hex) {
-    try {
-      return Color(int.parse(hex.trim().replaceAll('#', '0xFF')));
-    } catch (_) {
-      return GeoColors.primary;
-    }
-  }
+  Color _typeColor(String type) => switch (type) {
+    'blacklisted' => GeoColors.danger,
+    'unverified'  => GeoColors.warning,
+    _             => const Color(0xFF6366F1),
+  };
 
-  Color _sevColor(String sev) => switch (sev) {
-        'Critical' => GeoColors.danger,
-        'High' => GeoColors.warning,
-        'Medium' => const Color(0xFF6366F1),
-        _ => const Color(0xFF888888),
-      };
+  IconData _typeIcon(String type) => switch (type) {
+    'blacklisted' => Icons.block_outlined,
+    'unverified'  => Icons.gps_fixed_outlined,
+    _             => Icons.person_off_outlined,
+  };
+
+  String _typeLabel(String type) => switch (type) {
+    'blacklisted' => 'Blacklisted Individual',
+    'unverified'  => 'Geofence Violation',
+    _             => 'Unidentified Person',
+  };
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<ThemeNotifier>();
-    final active = _threats.where((t) => t.status == 'Active').length;
-    final resolving = _threats.where((t) => t.status == 'Resolving').length;
-    final resolved = _threats.where((t) => t.status == 'Resolved').length;
+    final theme    = context.watch<ThemeNotifier>();
+    final active   = _threats.where((t) => t['status'] == 'active').length;
+    final resolved = _threats.where((t) => t['status'] == 'resolved').length;
+    final blacklisted = _threats.where((t) => t['threat_type'] == 'blacklisted').length;
+    final unidentified = _threats.where((t) => t['threat_type'] == 'unidentified').length;
+    final unverified   = _threats.where((t) => t['threat_type'] == 'unverified').length;
 
     return AdminShell(
       activeRoute: '/admin/threats',
@@ -143,211 +82,105 @@ class _SecurityThreatsScreenState extends State<SecurityThreatsScreen> {
       topbarActions: [
         const LiveBadge(),
         const SizedBox(width: 8),
-        _topBtn('⬇ Export', theme),
-        const SizedBox(width: 8),
-        _topBtn('↺ Refresh', theme),
+        _topBtn(theme, Icons.refresh_outlined, 'Refresh', _load),
       ],
       body: Stack(children: [
         SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Security Threats',
-                style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: theme.textPrimary)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Security Threats', style: GoogleFonts.inter(
+              fontSize: 22, fontWeight: FontWeight.w800, color: theme.textPrimary)),
             const SizedBox(height: 4),
-            Text('Real-time monitoring of all campus security incidents.',
-                style: GoogleFonts.inter(
-                    fontSize: 13, color: theme.textSecondary)),
+            Text('Real-time monitoring of all campus security incidents. Only real detection events appear here.',
+              style: GoogleFonts.inter(fontSize: 13, color: theme.textSecondary)),
             const SizedBox(height: 20),
 
-            // Top section: pie + stats
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Pie card
-              Container(
-                width: 320,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                    color: theme.bgCard,
-                    border: Border.all(color: theme.border),
-                    borderRadius: BorderRadius.circular(GeoRadius.lg)),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('📊 Threat Breakdown',
-                          style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: theme.textPrimary)),
-                      const SizedBox(height: 18),
-                      Center(
-                          child: SizedBox(
-                              width: 200,
-                              height: 200,
-                              child: Stack(children: [
-                                CustomPaint(
-                                    size: const Size(200, 200),
-                                    painter: _PiePainter(_pieData)),
-                                Center(
-                                    child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                      Text('8',
-                                          style: GoogleFonts.inter(
-                                              fontSize: 28,
-                                              fontWeight: FontWeight.w800,
-                                              color: theme.textPrimary)),
-                                      Text('Total',
-                                          style: GoogleFonts.inter(
-                                              fontSize: 11,
-                                              color: theme.textTertiary)),
-                                    ])),
-                              ]))),
-                      const SizedBox(height: 16),
-                      ..._pieData
-                          .map((d) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Row(children: [
-                                  Container(
-                                      width: 10,
-                                      height: 10,
-                                      margin: const EdgeInsets.only(right: 8),
-                                      decoration: BoxDecoration(
-                                          color: _hexColor(d[1] as String),
-                                          shape: BoxShape.circle)),
-                                  Expanded(
-                                      child: Text(d[0] as String,
-                                          style: GoogleFonts.inter(
-                                              fontSize: 12,
-                                              color: theme.textPrimary))),
-                                  Text('${d[2]}',
-                                      style: GoogleFonts.inter(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: theme.textPrimary)),
-                                ]),
-                              ))
-                          .toList(),
-                    ]),
-              ),
-              const SizedBox(width: 20),
-
-              // Stats right
-              Expanded(
-                  child: Column(children: [
-                Row(children: [
-                  Expanded(
-                      child: StatCard(
-                          theme: theme,
-                          icon: '🚨',
-                          value: '$active',
-                          label: 'Active Threats',
-                          trend: '▲ 2',
-                          trendUp: false,
-                          iconBg: GeoColors.dangerGhost)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                      child: StatCard(
-                          theme: theme,
-                          icon: '⏳',
-                          value: '$resolving',
-                          label: 'Being Resolved',
-                          iconBg: GeoColors.warningGhost)),
-                ]),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                      child: StatCard(
-                          theme: theme,
-                          icon: '✓',
-                          value: '$resolved',
-                          label: 'Resolved Today',
-                          trend: '▲ 3',
-                          trendUp: true,
-                          iconBg: GeoColors.successGhost)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                      child: StatCard(
-                          theme: theme,
-                          icon: '🔒',
-                          value: '12',
-                          label: 'Guards On Duty')),
-                ]),
-                const SizedBox(height: 12),
-                // Recent resolutions
-                Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                        color: theme.bgCard,
-                        border: Border.all(color: theme.border),
-                        borderRadius: BorderRadius.circular(GeoRadius.lg)),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('⏱ Recent Resolutions',
-                              style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: theme.textPrimary)),
-                          const SizedBox(height: 12),
-                          _recentRes(theme, 'Tailgating — Library · 09:15 AM'),
-                          _recentRes(
-                              theme, 'Unknown Face — North Entry · 08:32 AM'),
-                          _recentRes(
-                              theme, 'Curfew breach — Block D · 11:22 PM'),
-                        ])),
-              ])),
+            // Stats
+            Row(children: [
+              Expanded(child: StatCard(theme: theme, icon: '!', value: '$active',
+                label: 'Active Threats', iconBg: GeoColors.dangerGhost,
+                trend: active > 0 ? 'Requires attention' : 'All clear', trendUp: false)),
+              const SizedBox(width: 12),
+              Expanded(child: StatCard(theme: theme, icon: 'B', value: '$blacklisted',
+                label: 'Blacklisted', iconBg: GeoColors.dangerGhost)),
+              const SizedBox(width: 12),
+              Expanded(child: StatCard(theme: theme, icon: 'U', value: '$unidentified',
+                label: 'Unidentified', iconBg: const Color(0x1A6366F1))),
+              const SizedBox(width: 12),
+              Expanded(child: StatCard(theme: theme, icon: 'G', value: '$unverified',
+                label: 'Geofence Violations', iconBg: GeoColors.warningGhost)),
+              const SizedBox(width: 12),
+              Expanded(child: StatCard(theme: theme, icon: 'R', value: '$resolved',
+                label: 'Resolved', iconBg: GeoColors.successGhost, trend: 'Total', trendUp: true)),
             ]),
             const SizedBox(height: 20),
 
-            // Threat list
+            // Filter tabs
             Container(
-              decoration: BoxDecoration(
-                  color: theme.bgCard,
-                  border: Border.all(color: theme.border),
-                  borderRadius: BorderRadius.circular(GeoRadius.lg)),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: theme.bgBadge,
+                borderRadius: BorderRadius.circular(GeoRadius.md)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _filterChip(theme, 'Active', 'active'),
+                _filterChip(theme, 'Resolved', 'resolved'),
+                _filterChip(theme, 'All', 'all'),
+              ]),
+            ),
+            const SizedBox(height: 16),
+
+            // Threat table
+            Container(
+              decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
+                borderRadius: BorderRadius.circular(GeoRadius.lg)),
               child: Column(children: [
+                // Header
                 Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    child: Row(children: [
-                      Text('⚠️ Active Threats',
-                          style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: theme.textPrimary)),
-                      const SizedBox(width: 10),
-                      Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 3),
-                          decoration: BoxDecoration(
-                              color: GeoColors.dangerGhost,
-                              borderRadius:
-                                  BorderRadius.circular(GeoRadius.full)),
-                          child: Text('$active Active',
-                              style: GoogleFonts.inter(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: GeoColors.danger))),
-                    ])),
-                // Header row
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(children: [
+                    Icon(Icons.warning_amber_outlined, size: 16,
+                      color: active > 0 ? GeoColors.danger : theme.textTertiary),
+                    const SizedBox(width: 8),
+                    Text('Threats', style: GoogleFonts.inter(
+                      fontSize: 14, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+                    const SizedBox(width: 10),
+                    if (active > 0) Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(color: GeoColors.dangerGhost,
+                        borderRadius: BorderRadius.circular(GeoRadius.full)),
+                      child: Text('$active Active', style: GoogleFonts.inter(
+                        fontSize: 11, fontWeight: FontWeight.w700, color: GeoColors.danger))),
+                  ])),
+
+                // Column headers
                 Container(
-                    color: theme.bgBadge,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
-                    child: Row(children: [
-                      _th(theme, '', 40),
-                      _th(theme, 'Incident', 0, flex: true),
-                      _th(theme, 'Time', 90),
-                      _th(theme, 'Severity', 90),
-                      _th(theme, 'Status', 100),
-                      _th(theme, 'Action', 100),
-                    ])),
+                  color: theme.bgBadge,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Row(children: [
+                    _th(theme, 'Type',      48),
+                    _th(theme, 'Incident',  0, flex: true),
+                    _th(theme, 'Gate',      120),
+                    _th(theme, 'Confidence',80),
+                    _th(theme, 'Time',      90),
+                    _th(theme, 'Status',    90),
+                    _th(theme, 'Action',    110),
+                  ])),
                 Divider(height: 1, color: theme.border),
 
-                ..._threats.map((t) => _threatRow(theme, t)),
+                if (_loading)
+                  const Padding(padding: EdgeInsets.all(40),
+                    child: Center(child: CircularProgressIndicator(color: GeoColors.primary)))
+                else if (_threats.isEmpty)
+                  Padding(padding: const EdgeInsets.all(40), child: Center(child: Column(children: [
+                    const Icon(Icons.shield_outlined, size: 40, color: GeoColors.success),
+                    const SizedBox(height: 12),
+                    Text('No threats detected.', style: GoogleFonts.inter(
+                      fontSize: 14, fontWeight: FontWeight.w700, color: GeoColors.success)),
+                    const SizedBox(height: 4),
+                    Text('All camera zones are clear.', style: GoogleFonts.inter(
+                      fontSize: 12, color: theme.textTertiary)),
+                  ])))
+                else
+                  ..._threats.map((t) => _threatRow(theme, t as Map<String, dynamic>)),
               ]),
             ),
           ]),
@@ -356,320 +189,200 @@ class _SecurityThreatsScreenState extends State<SecurityThreatsScreen> {
         // Detail panel
         if (_selected != null) ...[
           GestureDetector(
-              onTap: () => setState(() => _selected = null),
-              child: Container(color: Colors.black.withOpacity(.35))),
-          Positioned(
-              right: 0, top: 0, bottom: 0, child: _buildDetailPanel(theme)),
+            onTap: () => setState(() => _selected = null),
+            child: Container(color: Colors.black.withOpacity(.35))),
+          Positioned(right: 0, top: 0, bottom: 0, child: _buildDetailPanel(theme, _selected!)),
         ],
       ]),
     );
   }
 
-  Widget _recentRes(ThemeNotifier theme, String label) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(children: [
-        Container(
-            width: 8,
-            height: 8,
-            margin: const EdgeInsets.only(right: 8),
-            decoration: const BoxDecoration(
-                color: GeoColors.success, shape: BoxShape.circle)),
-        Expanded(
-            child: Text(label,
-                style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: theme.textPrimary))),
-        Text('✓ Resolved',
-            style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: GeoColors.success)),
-      ]));
+  Widget _filterChip(ThemeNotifier theme, String label, String value) => GestureDetector(
+    onTap: () { setState(() { _statusFilter = value; _loading = true; }); _load(); },
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: _statusFilter == value ? GeoColors.primary : Colors.transparent,
+        borderRadius: BorderRadius.circular(GeoRadius.sm)),
+      child: Text(label, style: GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w600,
+        color: _statusFilter == value ? Colors.white : theme.textSecondary)),
+    ));
 
-  Widget _th(ThemeNotifier theme, String label, double w, {bool flex = false}) {
-    final child = Text(label.toUpperCase(),
-        style: GoogleFonts.inter(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: theme.textTertiary,
-            letterSpacing: .5));
-    return flex ? Expanded(child: child) : SizedBox(width: w, child: child);
-  }
+  Widget _threatRow(ThemeNotifier theme, Map<String, dynamic> t) {
+    final type     = t['threat_type'] as String? ?? 'unidentified';
+    final color    = _typeColor(type);
+    final icon     = _typeIcon(type);
+    final name     = t['user_name'] as String? ?? 'Unknown Person';
+    final gate     = t['gate']   as String? ?? '—';
+    final conf     = (t['confidence'] as num?)?.toDouble() ?? 0;
+    final status   = t['status'] as String? ?? 'active';
+    final timeStr  = t['detected_at'] as String? ?? '';
+    final timeFmt  = timeStr.isNotEmpty
+        ? '${DateTime.parse(timeStr).toLocal().hour.toString().padLeft(2,'0')}:${DateTime.parse(timeStr).toLocal().minute.toString().padLeft(2,'0')}'
+        : '--:--';
 
-  Widget _threatRow(ThemeNotifier theme, _ThreatItem t) {
-    final sevColor = _sevColor(t.severity);
-    final statusBg = t.status == 'Active'
-        ? GeoColors.dangerGhost
-        : t.status == 'Resolving'
-            ? GeoColors.warningGhost
-            : GeoColors.successGhost;
-    final statusFg = t.status == 'Active'
-        ? GeoColors.danger
-        : t.status == 'Resolving'
-            ? GeoColors.warning
-            : GeoColors.success;
-    final time =
-        '${t.time.hour.toString().padLeft(2, '0')}:${t.time.minute.toString().padLeft(2, '0')}';
+    final statusBg = status == 'active' ? GeoColors.dangerGhost : GeoColors.successGhost;
+    final statusFg = status == 'active' ? GeoColors.danger : GeoColors.success;
 
     return Container(
-      decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: theme.border))),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Row(children: [
-          SizedBox(
-              width: 40,
-              child: Text(t.icon, style: const TextStyle(fontSize: 22))),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(t.title,
-                    style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: theme.textPrimary)),
-                Text('📍 ${t.gate} · $time',
-                    style: GoogleFonts.inter(
-                        fontSize: 11, color: theme.textTertiary)),
-              ])),
-          SizedBox(
-              width: 90,
-              child: Text(time,
-                  style: GoogleFonts.inter(
-                      fontSize: 12, color: theme.textSecondary))),
-          SizedBox(
-              width: 90,
-              child: Text(t.severity,
-                  style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: sevColor))),
-          SizedBox(
-              width: 100,
+          SizedBox(width: 48, child: Icon(icon, size: 22, color: color)),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_typeLabel(type), style: GoogleFonts.inter(
+              fontSize: 13, fontWeight: FontWeight.w700, color: theme.textPrimary)),
+            Text(name, style: GoogleFonts.inter(fontSize: 11, color: theme.textTertiary)),
+          ])),
+          SizedBox(width: 120, child: Text(gate, style: GoogleFonts.inter(
+            fontSize: 12, color: theme.textSecondary), overflow: TextOverflow.ellipsis)),
+          SizedBox(width: 80, child: Text('${conf.toStringAsFixed(0)}%', style: GoogleFonts.inter(
+            fontSize: 12, fontWeight: FontWeight.w700,
+            color: conf > 85 ? GeoColors.danger : GeoColors.warning))),
+          SizedBox(width: 90, child: Text(timeFmt, style: GoogleFonts.inter(
+            fontSize: 12, color: theme.textSecondary))),
+          SizedBox(width: 90, child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(GeoRadius.full)),
+            child: Text(status == 'active' ? 'Active' : 'Resolved', style: GoogleFonts.inter(
+              fontSize: 11, fontWeight: FontWeight.w700, color: statusFg)))),
+          SizedBox(width: 110, child: Row(children: [
+            GestureDetector(
+              onTap: () => setState(() => _selected = t),
               child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                  decoration: BoxDecoration(
-                      color: statusBg,
-                      borderRadius: BorderRadius.circular(GeoRadius.full)),
-                  child: Text(t.status,
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: statusFg)))),
-          SizedBox(
-              width: 100,
-              child: GestureDetector(
-                  onTap: () => setState(() => _selected = t),
-                  child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                          color: GeoColors.primary,
-                          borderRadius: BorderRadius.circular(GeoRadius.sm)),
-                      child: Text('🔍 Track',
-                          style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white))))),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: GeoColors.primary, borderRadius: BorderRadius.circular(GeoRadius.sm)),
+                child: Text('Details', style: GoogleFonts.inter(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)))),
+            const SizedBox(width: 6),
+            if (status == 'active') GestureDetector(
+              onTap: () => _resolve(t['id'] as int),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  border: Border.all(color: GeoColors.success),
+                  borderRadius: BorderRadius.circular(GeoRadius.sm)),
+                child: const Icon(Icons.check, size: 13, color: GeoColors.success))),
+          ])),
         ]),
       ),
     );
   }
 
-  // ── DETAIL PANEL ──────────────────────────────────────────────────────
-  Widget _buildDetailPanel(ThemeNotifier theme) {
-    final t = _selected!;
+  Widget _buildDetailPanel(ThemeNotifier theme, Map<String, dynamic> t) {
+    final type  = t['threat_type'] as String? ?? 'unidentified';
+    final color = _typeColor(type);
+    final icon  = _typeIcon(type);
+    final snap  = t['snapshot_path'] as String?;
+    final fname = snap?.split(RegExp(r'[\\/]')).last;
+
     return Container(
-      width: 520,
+      width: 480,
       color: theme.bgCard,
       child: Column(children: [
+        // Header
         Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: theme.border))),
-            child: Row(children: [
-              Expanded(
-                  child: Text('${t.icon} ${t.type}',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: theme.textPrimary))),
-              GestureDetector(
-                  onTap: () => setState(() => _selected = null),
-                  child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                          color: theme.bgBadge, shape: BoxShape.circle),
-                      child: Center(
-                          child: Text('✕',
-                              style: GoogleFonts.inter(
-                                  fontSize: 16, color: theme.textPrimary))))),
-            ])),
-        Expanded(
-            child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.border))),
+          child: Row(children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 10),
+            Expanded(child: Text(_typeLabel(type), style: GoogleFonts.inter(
+              fontSize: 16, fontWeight: FontWeight.w800, color: theme.textPrimary))),
+            GestureDetector(
+              onTap: () => setState(() => _selected = null),
+              child: Container(width: 30, height: 30,
+                decoration: BoxDecoration(color: theme.bgBadge, shape: BoxShape.circle),
+                child: Center(child: Icon(Icons.close, size: 16, color: theme.textPrimary)))),
+          ])),
+
+        // Content
+        Expanded(child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _panelSectionTitle(theme, 'INCIDENT INFORMATION'),
-            _detailRow(theme, 'Location', '📍 ${t.gate}'),
-            _detailRow(theme, 'Time Detected',
-                '${t.time.hour.toString().padLeft(2, "0")}:${t.time.minute.toString().padLeft(2, "0")}'),
-            _detailRow(theme, 'Severity', t.severity),
-            _detailRow(theme, 'Verified Status', '⏳ Pending Verification'),
-            _detailRow(theme, 'Assigned Guard',
-                '${_guards[0]['name']} · +91 98001 11111'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _panelSection(theme, 'INCIDENT INFORMATION'),
+            _panelRow(theme, 'Threat Type',   _typeLabel(type)),
+            _panelRow(theme, 'Person',        t['user_name'] as String? ?? 'Unknown'),
+            _panelRow(theme, 'Gate',          t['gate'] as String? ?? '—'),
+            _panelRow(theme, 'Confidence',    '${((t['confidence'] as num?)?.toDouble() ?? 0).toStringAsFixed(1)}%'),
+            _panelRow(theme, 'Status',        (t['status'] as String? ?? '—').toUpperCase()),
+            _panelRow(theme, 'Detected',      _fmtDateTime(t['detected_at'] as String? ?? '')),
+            if (t['resolved_at'] != null)
+              _panelRow(theme, 'Resolved',    _fmtDateTime(t['resolved_at'] as String)),
             const SizedBox(height: 20),
-            _panelSectionTitle(theme, '📍 THREAT LOCATION MAP'),
-            Container(
-                height: 200,
+
+            // Screenshot
+            if (fname != null) ...[
+              _panelSection(theme, 'SNAPSHOT'),
+              Container(
+                height: 180, width: double.infinity,
                 decoration: BoxDecoration(
-                    color: const Color(0xFF1A1A2E),
-                    borderRadius: BorderRadius.circular(GeoRadius.md),
-                    border: Border.all(color: theme.border)),
-                child: Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Text('🗺️', style: TextStyle(fontSize: 48)),
+                  color: const Color(0xFF0A0A0A),
+                  borderRadius: BorderRadius.circular(GeoRadius.md),
+                  border: Border.all(color: theme.border)),
+                child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.camera_alt_outlined, size: 32, color: Colors.white38),
                   const SizedBox(height: 8),
-                  Text('Map: ${t.gate}',
-                      style: GoogleFonts.inter(
-                          fontSize: 13, color: Colors.white70)),
+                  Text(fname, style: GoogleFonts.inter(fontSize: 11, color: Colors.white38),
+                    overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
-                  Text('Lat: 12.91°N  Lng: 77.52°E',
-                      style: GoogleFonts.inter(
-                          fontSize: 11, color: Colors.white38)),
+                  Text('Screenshots auto-deleted after 15 days',
+                    style: GoogleFonts.inter(fontSize: 10, color: Colors.white24)),
                 ]))),
-            const SizedBox(height: 20),
-            _panelSectionTitle(theme, '👮 NEARBY SECURITY GUARDS'),
-            ..._guards.map((g) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(children: [
-                  Container(
-                      width: 36,
-                      height: 36,
-                      decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                              colors: [Color(0xFF1D4ED8), Color(0xFF1E3A8A)])),
-                      child: Center(
-                          child: Text(g['init']!,
-                              style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white)))),
-                  const SizedBox(width: 12),
-                  Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text('${g['name']} ${g['id']}',
-                            style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: theme.textPrimary)),
-                        Text('📍 ${g['zone']}',
-                            style: GoogleFonts.inter(
-                                fontSize: 11, color: theme.textTertiary)),
-                      ])),
-                  Text('🏃 ${g['eta']}',
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: GeoColors.success)),
-                ]))),
+              const SizedBox(height: 20),
+            ],
+
+            // Actions
+            if (t['status'] == 'active') ElevatedButton.icon(
+              icon: const Icon(Icons.check, size: 16),
+              label: const Text('Mark as Resolved'),
+              style: ElevatedButton.styleFrom(backgroundColor: GeoColors.success),
+              onPressed: () { _resolve(t['id'] as int); setState(() => _selected = null); },
+            ),
           ]),
         )),
       ]),
     );
   }
 
-  Widget _panelSectionTitle(ThemeNotifier theme, String title) => Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(title,
-          style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: theme.textTertiary,
-              letterSpacing: .8)));
+  Widget _panelSection(ThemeNotifier theme, String title) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Text(title, style: GoogleFonts.inter(
+      fontSize: 11, fontWeight: FontWeight.w700,
+      color: theme.textTertiary, letterSpacing: .8)));
 
-  Widget _detailRow(ThemeNotifier theme, String key, String value) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(key,
-            style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
-        Text(value,
-            style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: theme.textPrimary)),
-      ]));
+  Widget _panelRow(ThemeNotifier theme, String key, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(key, style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary)),
+      Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: theme.textPrimary)),
+    ]));
 
-  Widget _topBtn(String label, ThemeNotifier theme) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      decoration: BoxDecoration(
-          color: theme.bgCard,
-          border: Border.all(color: theme.border),
+  Widget _th(ThemeNotifier theme, String label, double w, {bool flex = false}) {
+    final child = Text(label.toUpperCase(), style: GoogleFonts.inter(
+      fontSize: 11, fontWeight: FontWeight.w700, color: theme.textTertiary, letterSpacing: .5));
+    return flex ? Expanded(child: child) : SizedBox(width: w, child: child);
+  }
+
+  Widget _topBtn(ThemeNotifier theme, IconData icon, String label, VoidCallback onTap) =>
+    GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(color: theme.bgCard, border: Border.all(color: theme.border),
           borderRadius: BorderRadius.circular(GeoRadius.sm)),
-      child: Text(label,
-          style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: theme.textSecondary)));
-}
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: theme.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: theme.textSecondary)),
+        ])));
 
-class _ThreatItem {
-  final String icon, title, type, gate, severity, status;
-  final DateTime time;
-  const _ThreatItem(
-      {required this.icon,
-      required this.title,
-      required this.type,
-      required this.gate,
-      required this.severity,
-      required this.status,
-      required this.time});
-}
-
-// ── PIE CHART PAINTER ─────────────────────────────────────────────────────
-class _PiePainter extends CustomPainter {
-  final List<dynamic> data;
-  const _PiePainter(this.data);
-
-  Color _hexColor(String hex) {
-    try {
-      return Color(int.parse(hex.trim().replaceAll('#', '0xFF')));
-    } catch (_) {
-      return Colors.grey;
-    }
+  String _fmtDateTime(String iso) {
+    if (iso.isEmpty) return '—';
+    final dt = DateTime.parse(iso).toLocal();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${dt.day} ${months[dt.month-1]} ${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
   }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final total = data.fold<int>(0, (s, d) => s + (d[2] as int));
-    final cx = size.width / 2, cy = size.height / 2, r = size.width / 2 - 4;
-    double start = -3.14159 / 2;
-
-    for (final d in data) {
-      final sweep = (d[2] as int) / total * 2 * 3.14159;
-      final paint = Paint()
-        ..color = _hexColor(d[1] as String)
-        ..style = PaintingStyle.fill;
-      canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), start,
-          sweep, true, paint);
-      start += sweep;
-    }
-    // Donut hole
-    canvas.drawCircle(
-        Offset(cx, cy),
-        r * 0.56,
-        Paint()
-          ..color = const Color(0xFF1A1A1A)
-          ..style = PaintingStyle.fill);
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
 }

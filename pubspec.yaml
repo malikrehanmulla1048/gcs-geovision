@@ -4,12 +4,11 @@ version: 1.0.0+1
 publish_to: none
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  provider: ^6.1.2
 
   # Navigation
   go_router: ^13.2.0
@@ -26,8 +25,16 @@ dependencies:
   # Utils
   intl: ^0.19.0
   uuid: ^4.4.0
+
+  # HTTP (backend API calls)
   http: ^1.2.1
+  http_parser: ^4.0.2
+
+  # WebSocket (camera stream)
   web_socket_channel: ^3.0.1
+
+  # Web APIs (webcam access via dart:js_interop)
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -39,8 +46,3 @@ flutter:
 
   assets:
     - assets/logo.png
-    - assets/logo.svg
-    - assets/cctv_main_gate.png
-    - assets/cctv_library.png
-    - assets/cctv_lobby.png
-    - assets/cctv_parking.png
