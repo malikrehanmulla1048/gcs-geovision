@@ -5,7 +5,10 @@ import 'package:http_parser/http_parser.dart';
 
 /// Communicates with the Python FastAPI backend at localhost:8000.
 class BackendService {
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = String.fromEnvironment(
+    'BACKEND_URL',
+    defaultValue: 'http://localhost:8000',
+  );
   static const Duration _timeout = Duration(seconds: 20);
 
   final http.Client _client = http.Client();
@@ -217,6 +220,14 @@ class BackendService {
       Uri.parse('$baseUrl/users/$email/blacklist'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'blacklisted': blacklisted}),
+    ).timeout(_timeout);
+  }
+
+  Future<void> setGeofenced(String email, bool geofenced) async {
+    await _client.post(
+      Uri.parse('$baseUrl/users/$email/geofence'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'geofenced': geofenced}),
     ).timeout(_timeout);
   }
 

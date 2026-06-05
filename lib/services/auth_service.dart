@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'backend_service.dart';
+import 'geofence_service.dart';
 
 /// Mirrors session / auth backed by the Python backend.
 /// Passwords are bcrypt-hashed server-side — never sent plaintext after first call.
@@ -29,6 +30,7 @@ class AuthService extends ChangeNotifier {
       final user = await _backend.getUser(email);
       if (user != null) {
         _userData = user;
+        GeofenceService().startTracking(email);
         notifyListeners();
       }
     } catch (_) {
@@ -48,6 +50,7 @@ class AuthService extends ChangeNotifier {
       _userData = result['user'] as Map<String, dynamic>;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('gv_session_email', email);
+      GeofenceService().startTracking(email);
       notifyListeners();
       return (ok: true, error: null);
     } catch (e) {
@@ -83,6 +86,7 @@ class AuthService extends ChangeNotifier {
     _userData = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('gv_session_email');
+    GeofenceService().stopTracking();
     notifyListeners();
   }
 

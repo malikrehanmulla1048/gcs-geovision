@@ -36,13 +36,26 @@ dependencies:
   # Web APIs (webcam access via dart:js_interop)
   web: ^1.1.0
 
+  # Geolocation for physical geofencing
+  geolocator: ^11.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  msix: ^3.16.0
 
 flutter:
   uses-material-design: true
 
   assets:
     - assets/logo.png
+
+msix_config:
+  display_name: GeoVision Campus Security
+  publisher_display_name: GeoVision
+  publisher: CN=GeoVision, O=GeoVision, C=US
+  identity_name: com.geovision.gcs
+  version: 1.0.0.0
+  logo_path: assets/logo.png
+  capabilities: internetClient, webcam

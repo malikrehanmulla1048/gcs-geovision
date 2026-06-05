@@ -1,4 +1,4 @@
-package com.example.geovision_campus_security
+package com.geovision.gcs
 
 import io.flutter.embedding.android.FlutterActivity
 

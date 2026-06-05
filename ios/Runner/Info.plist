@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>GeoVision needs access to your location to verify if you are within the campus boundary.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>GeoVision needs background location access to verify campus attendance boundaries.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>GeoVision tracks location in the background to automatically register you when entering campus.</string>
 </dict>
 </plist>
