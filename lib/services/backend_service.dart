@@ -104,6 +104,20 @@ class BackendService {
     return jsonDecode(body) as Map<String, dynamic>;
   }
 
+  /// Run face recognition on a single JPEG frame.
+  Future<Map<String, dynamic>> recognizeFrame(String gate, Uint8List jpegBytes) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/recognize'));
+    req.fields['gate'] = gate;
+    req.files.add(http.MultipartFile.fromBytes(
+      'image', jpegBytes,
+      filename: 'frame.jpg',
+      contentType: MediaType('image', 'jpeg'),
+    ));
+    final streamed = await req.send().timeout(_timeout);
+    final body = await streamed.stream.bytesToString();
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
   // ── STATS ────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> getStats() async {
