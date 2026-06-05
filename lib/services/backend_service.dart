@@ -7,7 +7,7 @@ import 'package:http_parser/http_parser.dart';
 class BackendService {
   static const String baseUrl = String.fromEnvironment(
     'BACKEND_URL',
-    defaultValue: 'http://localhost:8000',
+    defaultValue: 'https://marcpedrin-geovision-backend.hf.space',
   );
   static const Duration _timeout = Duration(seconds: 20);
 

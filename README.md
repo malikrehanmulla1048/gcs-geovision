@@ -35,7 +35,12 @@ lib/
         └── face_enrol_screen.dart     ← Animated face capture flow
 ```
 
-## 🚀 Getting Started
+## 🚀 Live Demo & Deployment
+
+- **Frontend Web App (Surge):** [https://geovision-campus-sec-123.surge.sh](https://geovision-campus-sec-123.surge.sh)
+- **Backend API (Hugging Face):** [https://marcpedrin-geovision-backend.hf.space](https://marcpedrin-geovision-backend.hf.space)
+
+## 🚀 Quick Start (Local Development)
 
 ### Prerequisites
 - Flutter SDK ≥ 3.10.0

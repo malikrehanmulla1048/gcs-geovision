@@ -33,11 +33,16 @@ dependencies:
   # WebSocket (camera stream)
   web_socket_channel: ^3.0.1
 
-  # Web APIs (webcam access via dart:js_interop)
-  web: ^1.1.0
+  # Web APIs (webcam access via dart:js_interop) - web-only, not compiled for Android
+  web: ^0.5.1
+
+  # URL launcher (for update downloads)
+  url_launcher: ^6.3.0
 
   # Geolocation for physical geofencing
   geolocator: ^11.0.0
+  camera: ^0.12.0+1
+  camera_windows: ^0.2.6+4
 
 dev_dependencies:
   flutter_test:

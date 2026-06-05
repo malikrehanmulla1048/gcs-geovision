@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +11,7 @@ import '../../services/auth_service.dart';
 import '../../services/backend_service.dart';
 import '../../widgets/admin_sidebar.dart';
 import '../../widgets/common_widgets.dart';
+import '../../utils/web_camera_helper.dart';
 
 class CctvFeedScreen extends StatefulWidget {
   const CctvFeedScreen({super.key});
@@ -30,7 +32,13 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
   bool _hasThreat = false;
   bool _loading   = true;
   bool _camError  = false;
+  bool _noCamera  = false; // true when cloud server has no physical webcam
   String _camErrorMsg = '';
+
+  // Browser webcam mode (web only)
+  bool _browserCamActive = false;
+  bool _browserCamLoading = false;
+  String _viewType = '';
 
   final TextEditingController _addNameCtrl   = TextEditingController();
   final TextEditingController _addSourceCtrl = TextEditingController();
@@ -41,11 +49,15 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
     super.initState();
     _backend = context.read<AuthService>().backend;
     _loadCameras();
+    if (kIsWeb) {
+      _viewType = WebCameraHelper.registerViewFactory();
+    }
   }
 
   @override
   void dispose() {
     _wsChannel?.sink.close();
+    if (_browserCamActive) WebCameraHelper.stopCamera();
     _addNameCtrl.dispose();
     _addSourceCtrl.dispose();
     super.dispose();
@@ -73,21 +85,34 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
       _detections   = [];
       _hasThreat    = false;
       _camError     = false;
+      _noCamera     = false;
     });
     _connectWebSocket(id);
   }
 
   void _connectWebSocket(int cameraId) {
-    const wsBase = 'ws://localhost:8000/ws/camera';
+    final baseUrl = BackendService.baseUrl;
+    final wsBase = baseUrl
+        .replaceFirst('http://', 'ws://')
+        .replaceFirst('https://', 'wss://');
     try {
-      _wsChannel = WebSocketChannel.connect(Uri.parse('$wsBase/$cameraId'));
+      _wsChannel = WebSocketChannel.connect(Uri.parse('$wsBase/ws/camera/$cameraId'));
       _wsChannel!.stream.listen(
         (msg) {
           if (!mounted) return;
           try {
             final data = jsonDecode(msg as String) as Map<String, dynamic>;
             if (data['error'] != null) {
-              setState(() { _camError = true; _camErrorMsg = data['error'] as String; });
+              final err = data['error'] as String;
+              final noCamera = err.toLowerCase().contains('no camera') ||
+                  err.toLowerCase().contains('cannot open') ||
+                  err.toLowerCase().contains('index out') ||
+                  err.toLowerCase().contains('device not found');
+              setState(() {
+                _camError = true;
+                _noCamera = noCamera;
+                _camErrorMsg = err;
+              });
               return;
             }
             final b64   = data['frame_b64'] as String;
@@ -97,18 +122,31 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
               _detections   = (data['detections'] as List?) ?? [];
               _hasThreat    = data['has_threat'] == true;
               _camError     = false;
+              _noCamera     = false;
             });
           } catch (_) {}
         },
         onError: (_) {
-          if (mounted) setState(() { _camError = true; _camErrorMsg = 'Connection lost. Is the backend running?'; });
+          if (mounted) setState(() {
+            _camError = true;
+            _noCamera = true;
+            _camErrorMsg = 'WebSocket connection failed.';
+          });
         },
         onDone: () {
-          if (mounted) setState(() { _camError = true; _camErrorMsg = 'Camera stream disconnected.'; });
+          if (mounted) setState(() {
+            _camError = true;
+            _noCamera = true;
+            _camErrorMsg = 'Camera stream disconnected.';
+          });
         },
       );
     } catch (e) {
-      setState(() { _camError = true; _camErrorMsg = 'Cannot connect to backend: $e'; });
+      setState(() {
+        _camError = true;
+        _noCamera = true;
+        _camErrorMsg = 'Cannot connect to backend: $e';
+      });
     }
   }
 
@@ -248,23 +286,53 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
                         width: _hasThreat ? 2 : 1)),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(GeoRadius.lg - 1),
-                      child: _camError
-                          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                              const Icon(Icons.videocam_off_outlined, size: 48, color: Colors.white38),
-                              const SizedBox(height: 12),
-                              Text(_camErrorMsg, style: GoogleFonts.inter(
-                                fontSize: 13, color: Colors.white54), textAlign: TextAlign.center),
-                              const SizedBox(height: 12),
-                              TextButton(
-                                onPressed: () => _connectWebSocket(_selectedCameraId),
-                                child: const Text('Retry', style: TextStyle(color: GeoColors.primary)),
-                              ),
-                            ]))
-                          : _currentFrame == null
-                              ? const Center(child: CircularProgressIndicator(color: GeoColors.primary))
-                              : Image.memory(_currentFrame!,
-                                  fit: BoxFit.contain,
-                                  gaplessPlayback: true),
+                      child: _browserCamActive
+                          ? Stack(children: [
+                              if (_viewType.isNotEmpty)
+                                HtmlElementView(viewType: _viewType),
+                              Positioned(
+                                top: 12, right: 12,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    WebCameraHelper.stopCamera();
+                                    setState(() => _browserCamActive = false);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(GeoRadius.sm)),
+                                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                      const Icon(Icons.stop_circle_outlined, size: 14, color: GeoColors.danger),
+                                      const SizedBox(width: 5),
+                                      Text('Stop Camera', style: GoogleFonts.inter(
+                                        fontSize: 11, color: Colors.white)),
+                                    ]),
+                                  ),
+                                )),
+                              Positioned(
+                                top: 12, left: 12,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: GeoColors.danger.withOpacity(0.85),
+                                    borderRadius: BorderRadius.circular(GeoRadius.sm)),
+                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    Container(width: 6, height: 6,
+                                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+                                    const SizedBox(width: 5),
+                                    Text('LIVE — Browser Camera', style: GoogleFonts.inter(
+                                      fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+                                  ]),
+                                )),
+                            ])
+                          : _camError
+                              ? (_noCamera ? _buildNoLocalCameraWidget(theme) : _buildErrorWidget(theme))
+                              : _currentFrame == null
+                                  ? const Center(child: CircularProgressIndicator(color: GeoColors.primary))
+                                  : Image.memory(_currentFrame!,
+                                      fit: BoxFit.contain,
+                                      gaplessPlayback: true),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -299,6 +367,109 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
             ]),
     );
   }
+
+  Widget _buildNoLocalCameraWidget(ThemeNotifier theme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: GeoColors.primaryGhost,
+              shape: BoxShape.circle),
+            child: const Icon(Icons.videocam_outlined, size: 48, color: GeoColors.primary)),
+          const SizedBox(height: 20),
+          Text('No Backend Camera',
+            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
+          const SizedBox(height: 8),
+          Text(
+            'The cloud server has no webcam. Use your browser camera\nor run the backend locally for full face recognition.',
+            style: GoogleFonts.inter(fontSize: 12, color: Colors.white54, height: 1.6),
+            textAlign: TextAlign.center),
+          const SizedBox(height: 20),
+
+          // Primary: Use browser webcam
+          if (kIsWeb) ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _browserCamLoading ? null : () async {
+                  setState(() => _browserCamLoading = true);
+                  final ok = await WebCameraHelper.startCamera();
+                  setState(() {
+                    _browserCamLoading = false;
+                    if (ok) {
+                      _browserCamActive = true;
+                      _camError = false;
+                    }
+                  });
+                  if (!ok && mounted) {
+                    GeoToast.show(context, 'Camera permission denied.', type: 'error');
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: GeoColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(GeoRadius.md))),
+                icon: _browserCamLoading
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.videocam, size: 18, color: Colors.white),
+                label: Text(
+                  _browserCamLoading ? 'Requesting permission…' : '📷  Use Your Webcam (Browser)',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: Colors.white)),
+              )),
+            const SizedBox(height: 12),
+            Text('— or run backend locally for face recognition —',
+              style: GoogleFonts.inter(fontSize: 11, color: Colors.white24)),
+            const SizedBox(height: 12),
+          ],
+
+          // Secondary: local backend instructions
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F0F0F),
+              borderRadius: BorderRadius.circular(GeoRadius.md),
+              border: Border.all(color: GeoColors.primary.withOpacity(0.3))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _codeRow('1. cd backend/'),
+              _codeRow('2. pip install -r requirements.txt'),
+              _codeRow('3. python main.py'),
+            ])),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: () => _connectWebSocket(_selectedCameraId),
+            icon: const Icon(Icons.refresh, size: 16, color: GeoColors.primary),
+            label: Text('Retry Backend Connection',
+              style: GoogleFonts.inter(fontSize: 13, color: GeoColors.primary))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget(ThemeNotifier theme) {
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.videocam_off_outlined, size: 48, color: Colors.white38),
+        const SizedBox(height: 12),
+        Text(_camErrorMsg, style: GoogleFonts.inter(
+          fontSize: 13, color: Colors.white54), textAlign: TextAlign.center),
+        const SizedBox(height: 12),
+        TextButton(
+          onPressed: () => _connectWebSocket(_selectedCameraId),
+          child: const Text('Retry', style: TextStyle(color: GeoColors.primary)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _codeRow(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Text(text, style: GoogleFonts.robotoMono(
+      fontSize: 11, color: GeoColors.primary)));
 
   Widget _detectionChip(ThemeNotifier theme, Map<String, dynamic> d) {
     final threat = d['threat_type'] as String?;

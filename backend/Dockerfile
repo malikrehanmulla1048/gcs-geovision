@@ -1,15 +1,21 @@
 FROM python:3.10-slim
 
-# Install system dependencies for OpenCV and other packages
+# Install system build dependencies and runtime dependencies for OpenCV
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
     build-essential \
+    python3-dev \
+    cmake \
+    g++ \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements and install
+# Upgrade build utilities and install prerequisites for insightface compilation
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel Cython numpy==1.26.4
+
+# Copy requirements and install remaining dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

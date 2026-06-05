@@ -1,14 +1,11 @@
-// ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:async';
 import 'dart:convert';
-import 'dart:js_interop';
-import 'dart:js_util' as js_util;
 import 'dart:typed_data';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:web/web.dart' as web;
 import '../../theme/app_theme.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/common_widgets.dart';
@@ -43,14 +40,12 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
 
   late AnimationController _pulse;
 
-  // JS interop: hold a reference to the capture function
-  late final _CaptureHelper _captureHelper;
+  CameraController? _cameraController;
 
   @override
   void initState() {
     super.initState();
     _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
-    _captureHelper = _CaptureHelper();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initCamera());
   }
 
@@ -58,13 +53,37 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
   void dispose() {
     _pulse.dispose();
     _poseTimer?.cancel();
-    _captureHelper.stopCamera();
+    _autoCaptureTimer?.cancel();
+    _cameraController?.dispose();
     super.dispose();
   }
 
   Future<void> _initCamera() async {
     try {
-      await _captureHelper.startCamera();
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) setState(() => _error = 'No cameras found on device');
+        return;
+      }
+      
+      // Prefer front camera
+      CameraDescription? frontCamera;
+      for (var cam in cameras) {
+        if (cam.lensDirection == CameraLensDirection.front) {
+          frontCamera = cam;
+          break;
+        }
+      }
+      final selectedCamera = frontCamera ?? cameras.first;
+
+      _cameraController = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+
+      await _cameraController!.initialize();
+      
       if (mounted) {
         setState(() => _cameraReady = true);
         _startPoseLoop();
@@ -73,6 +92,10 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
       if (mounted) setState(() => _error = 'Camera access denied: $e');
     }
   }
+
+  // Auto-capture fallback timer (fires if backend doesn't validate within 2s)
+  Timer? _autoCaptureTimer;
+  int _consecutiveBackendErrors = 0;
 
   void _startPoseLoop() {
     _poseTimer = Timer.periodic(const Duration(milliseconds: 700), (_) async {
@@ -87,9 +110,67 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
     });
   }
 
+  // Called when backend is unreachable — auto-capture after 2 sec hold
+  void _scheduleAutoCaptureIfNeeded() {
+    if (_consecutiveBackendErrors < 3) return; // wait for 3 failures first
+    _autoCaptureTimer?.cancel();
+    _autoCaptureTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || _stepCaptured || _currentStep == _EnrolStep.processing) return;
+      _forceCapture();
+    });
+  }
+
+  Future<void> _forceCapture() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_stepCaptured || _currentStep == _EnrolStep.processing) return;
+    XFile? file;
+    try {
+      file = await _cameraController!.takePicture();
+    } catch (_) { return; }
+    final jpeg = await file.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _stepCaptured = true;
+      _instruction  = '✓ Face captured!';
+    });
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    switch (_currentStep) {
+      case _EnrolStep.front:
+        _frontFrame = jpeg;
+        setState(() {
+          _currentStep  = _EnrolStep.left;
+          _stepCaptured = false;
+          _consecutiveBackendErrors = 0;
+          _instruction = 'Now slowly turn your head to the LEFT.';
+        });
+      case _EnrolStep.left:
+        _leftFrame = jpeg;
+        setState(() {
+          _currentStep  = _EnrolStep.right;
+          _stepCaptured = false;
+          _consecutiveBackendErrors = 0;
+          _instruction = 'Now slowly turn your head to the RIGHT.';
+        });
+      case _EnrolStep.right:
+        _rightFrame = jpeg;
+        _submitEnrolment();
+      default: break;
+    }
+  }
+
   Future<void> _checkCurrentStep() async {
-    final jpeg = await _captureHelper.captureFrame();
-    if (jpeg == null || jpeg.isEmpty) return;
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    
+    XFile? file;
+    try {
+      file = await _cameraController!.takePicture();
+    } catch (_) {
+      return;
+    }
+    
+    final jpeg = await file.readAsBytes();
+    if (jpeg.isEmpty) return;
 
     final auth    = context.read<AuthService>();
     final email   = auth.userEmail ?? '';
@@ -101,6 +182,8 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
       );
 
       if (!mounted) return;
+      _consecutiveBackendErrors = 0; // reset on success
+      _autoCaptureTimer?.cancel();
       if (result['frame_accepted'] == true) {
         setState(() {
           _stepCaptured = true;
@@ -134,7 +217,11 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
         if (mounted) setState(() => _instruction = result['message'] ?? '');
       }
     } catch (_) {
-      if (mounted) setState(() => _instruction = 'Connecting to backend...');
+      _consecutiveBackendErrors++;
+      if (mounted) {
+        setState(() => _instruction = 'Backend unreachable — auto-capture in 2s…');
+        _scheduleAutoCaptureIfNeeded();
+      }
     }
   }
 
@@ -145,7 +232,6 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
       _instruction = 'Processing face data...';
     });
     _poseTimer?.cancel();
-    _captureHelper.stopCamera();
 
     try {
       final auth   = context.read<AuthService>();
@@ -255,6 +341,24 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
         Text('Keep your face in frame. The system captures automatically when your pose is correct.',
           style: GoogleFonts.inter(fontSize: 12, color: theme.textTertiary, height: 1.6),
           textAlign: TextAlign.center),
+        if (!_stepCaptured && _cameraReady &&
+            _currentStep != _EnrolStep.processing &&
+            _currentStep != _EnrolStep.done) ...[
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _forceCapture,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: GeoColors.primary),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(GeoRadius.md))),
+              icon: const Icon(Icons.photo_camera, size: 18, color: GeoColors.primary),
+              label: Text('Capture Now',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: GeoColors.primary)),
+            )),
+        ],
       ]),
     ),
     const SizedBox(height: 20),
@@ -344,7 +448,7 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
         else
           Positioned.fill(child: ClipRRect(
             borderRadius: BorderRadius.circular(GeoRadius.lg - 2),
-            child: _VideoPreview(captureHelper: _captureHelper))),
+            child: CameraPreview(_cameraController!))),
 
         // Corner brackets
         ..._buildCorners(color),
@@ -434,117 +538,7 @@ class _FaceEnrolScreenState extends State<FaceEnrolScreen>
     ]);
 }
 
-// ── Camera capture helper (JS interop) ─────────────────────────────────────
-class _CaptureHelper {
-  web.HTMLVideoElement? _video;
-  web.HTMLCanvasElement? _canvas;
-  bool _active = false;
 
-  Future<void> startCamera() async {
-    _video  = web.HTMLVideoElement()
-      ..autoplay = true
-      ..muted    = true
-      ..id       = 'gv-enrol-video';
-    _canvas = web.HTMLCanvasElement()
-      ..width  = 640
-      ..height = 480
-      ..id     = 'gv-enrol-canvas';
-
-    // Hide both elements from view
-    _video!.style.cssText  = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
-    _canvas!.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
-    web.document.body?.append(_video!);
-    web.document.body?.append(_canvas!);
-
-    // Request camera using promiseToFuture for web 1.1.x compatibility
-    final constraints = web.MediaStreamConstraints(
-      video: true.toJS,
-      audio: false.toJS,
-    );
-    final stream = await js_util.promiseToFuture<web.MediaStream>(
-      web.window.navigator.mediaDevices.getUserMedia(constraints),
-    );
-    _video!.srcObject = stream;
-    await js_util.promiseToFuture<void>(_video!.play());
-    _active = true;
-  }
-
-  void stopCamera() {
-    _active = false;
-    final stream = _video?.srcObject;
-    if (stream != null) {
-      final tracks = (stream as web.MediaStream).getTracks().toDart;
-      for (final t in tracks) t.stop();
-    }
-    _video?.remove();
-    _canvas?.remove();
-    _video  = null;
-    _canvas = null;
-  }
-
-  Future<Uint8List?> captureFrame() async {
-    if (!_active || _video == null || _canvas == null) return null;
-    try {
-      final ctx = _canvas!.getContext('2d') as web.CanvasRenderingContext2D;
-      
-      // Ensure canvas matches video aspect ratio exactly to prevent distortion
-      final vw = _video!.videoWidth;
-      final vh = _video!.videoHeight;
-      if (vw > 0 && vh > 0) {
-        if (_canvas!.width != vw || _canvas!.height != vh) {
-          _canvas!.width = vw;
-          _canvas!.height = vh;
-        }
-      }
-      
-      ctx.drawImage(_video!, 0, 0, _canvas!.width, _canvas!.height);
-      
-      final dataUrl = _canvas!.toDataURL('image/jpeg');
-      final comma = dataUrl.indexOf(',');
-      if (comma < 0) return null;
-      final b64 = dataUrl.substring(comma + 1);
-      return base64Decode(b64);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  bool get isActive => _active;
-}
-
-// ── Video preview widget ──────────────────────────────────────────────────
-class _VideoPreview extends StatefulWidget {
-  final _CaptureHelper captureHelper;
-  const _VideoPreview({required this.captureHelper});
-  @override
-  State<_VideoPreview> createState() => _VideoPreviewState();
-}
-
-class _VideoPreviewState extends State<_VideoPreview> {
-  Timer? _frameTimer;
-  Uint8List? _frame;
-
-  @override
-  void initState() {
-    super.initState();
-    // Poll the canvas at 15fps for display
-    _frameTimer = Timer.periodic(const Duration(milliseconds: 66), (_) async {
-      final bytes = await widget.captureHelper.captureFrame();
-      if (bytes != null && mounted) setState(() => _frame = bytes);
-    });
-  }
-
-  @override
-  void dispose() { _frameTimer?.cancel(); super.dispose(); }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_frame == null) {
-      return const Center(child: CircularProgressIndicator(color: GeoColors.primary));
-    }
-    return Image.memory(_frame!, fit: BoxFit.cover, gaplessPlayback: true);
-  }
-}
 
 // ── Corner painter ─────────────────────────────────────────────────────────
 class _CornerPainter extends CustomPainter {
