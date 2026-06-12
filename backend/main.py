@@ -45,22 +45,6 @@ app.add_middleware(
 matcher = GeofencedMatcher()
 _matcher_lock = threading.Lock()
 
-# ─── RECOGNITION EVENT COOLDOWN ───────────────────────────────────────────────
-# Prevents flooding the DB with one row per recognition tick.
-# Stores { key -> last_logged_timestamp }. key = user_id or 'unknown_camera_id'.
-_recog_cooldown: dict[str, float] = {}
-RECOG_COOLDOWN_MATCH_S   = 30   # seconds between DB writes for a known user
-RECOG_COOLDOWN_UNKNOWN_S = 10   # seconds between DB writes for unknown faces
-
-def _should_log_event(key: str, cooldown_s: int) -> bool:
-    """Return True (and arm the cooldown) if this event should be persisted."""
-    now = time.time()
-    last = _recog_cooldown.get(key, 0)
-    if now - last >= cooldown_s:
-        _recog_cooldown[key] = now
-        return True
-    return False
-
 
 def reload_matcher():
     enrolled = db.get_enrolled_users_with_embeddings()
@@ -383,27 +367,25 @@ async def camera_ws(websocket: WebSocket, camera_id: int):
                 # Auto-log and save threats
                 for det in last_detections:
                     if det["threat_type"]:
-                        if _should_log_event(f"threat:{gate_name}", RECOG_COOLDOWN_UNKNOWN_S):
-                            snap_path = save_screenshot(frame, det["threat_type"])
-                            db.add_threat(
-                                threat_type=det["threat_type"],
-                                gate=gate_name,
-                                user_email=det.get("email"),
-                                user_name=det.get("name"),
-                                confidence=det.get("confidence"),
-                                snapshot_path=snap_path,
-                            )
+                        snap_path = save_screenshot(frame, det["threat_type"])
+                        db.add_threat(
+                            threat_type=det["threat_type"],
+                            gate=gate_name,
+                            user_email=det.get("email"),
+                            user_name=det.get("name"),
+                            confidence=det.get("confidence"),
+                            snapshot_path=snap_path,
+                        )
                     if det["email"] and not det["threat_type"]:
-                        if _should_log_event(f"entry:{det['email']}:{gate_name}", RECOG_COOLDOWN_MATCH_S):
-                            db.add_entry_log(
-                                user_email=det["email"],
-                                user_name=det["name"],
-                                user_id=det.get("student_id") or "",
-                                dept=det.get("dept") or "",
-                                gate=gate_name,
-                                log_type="entry",
-                                confidence=det["confidence"],
-                            )
+                        db.add_entry_log(
+                            user_email=det["email"],
+                            user_name=det["name"],
+                            user_id=det.get("student_id") or "",
+                            dept=det.get("dept") or "",
+                            gate=gate_name,
+                            log_type="entry",
+                            confidence=det["confidence"],
+                        )
 
             # Draw overlay on frame
             annotated = frame.copy()
