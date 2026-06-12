@@ -39,7 +39,6 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
   bool _browserCamActive = false;
   bool _browserCamLoading = false;
   String _viewType = '';
-  Timer? _browserCamTimer;
 
   final TextEditingController _addNameCtrl   = TextEditingController();
   final TextEditingController _addSourceCtrl = TextEditingController();
@@ -58,7 +57,6 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
   @override
   void dispose() {
     _wsChannel?.sink.close();
-    _browserCamTimer?.cancel();
     if (_browserCamActive) WebCameraHelper.stopCamera();
     _addNameCtrl.dispose();
     _addSourceCtrl.dispose();
@@ -289,67 +287,15 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(GeoRadius.lg - 1),
                       child: _browserCamActive
-                          ? LayoutBuilder(builder: (ctx, constraints) {
-                              final double contWidth = constraints.maxWidth;
-                              final double contHeight = constraints.maxHeight;
-                              final Size vSize = WebCameraHelper.videoSize;
-                              double renderWidth = contWidth;
-                              double renderHeight = contWidth * vSize.height / vSize.width;
-                              if (renderHeight > contHeight) {
-                                renderHeight = contHeight;
-                                renderWidth = contHeight * vSize.width / vSize.height;
-                              }
-                              final double offsetX = (contWidth - renderWidth) / 2.0;
-                              final double offsetY = (contHeight - renderHeight) / 2.0;
-                              final double scaleX = renderWidth / vSize.width;
-                              final double scaleY = renderHeight / vSize.height;
-
-                              return Stack(children: [
-                                if (_viewType.isNotEmpty)
-                                  HtmlElementView(viewType: _viewType),
-                                
-                                ..._detections.map((d) {
-                                  final bbox = d['bbox'] as List;
-                                  final double x1 = (bbox[0] as num).toDouble();
-                                  final double y1 = (bbox[1] as num).toDouble();
-                                  final double x2 = (bbox[2] as num).toDouble();
-                                  final double y2 = (bbox[3] as num).toDouble();
-                                  final colorArr = d['color'] as List;
-                                  final color = Color.fromRGBO(colorArr[2], colorArr[1], colorArr[0], 1.0);
-                                  final label = '${d['name']} ${(d['confidence'] as num).toDouble().toStringAsFixed(0)}%';
-                                  
-                                  return Positioned(
-                                    left: offsetX + (x1 * scaleX),
-                                    top: offsetY + (y1 * scaleY),
-                                    width: (x2 - x1) * scaleX,
-                                    height: (y2 - y1) * scaleY,
-                                    child: Container(
-                                      decoration: BoxDecoration(border: Border.all(color: color, width: 2)),
-                                      child: Align(
-                                        alignment: Alignment.topLeft,
-                                        child: Transform.translate(
-                                          offset: const Offset(0, -18),
-                                          child: Container(
-                                            color: color,
-                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }),
+                          ? Stack(children: [
+                              if (_viewType.isNotEmpty)
+                                HtmlElementView(viewType: _viewType),
                               Positioned(
                                 top: 12, right: 12,
                                 child: GestureDetector(
                                   onTap: () {
                                     WebCameraHelper.stopCamera();
-                                    _browserCamTimer?.cancel();
-                                    setState(() {
-                                      _browserCamActive = false;
-                                      _detections = [];
-                                      _hasThreat = false;
-                                    });
+                                    setState(() => _browserCamActive = false);
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -379,8 +325,7 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
                                       fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
                                   ]),
                                 )),
-                            ]);
-                          })
+                            ])
                           : _camError
                               ? (_noCamera ? _buildNoLocalCameraWidget(theme) : _buildErrorWidget(theme))
                               : _currentFrame == null
@@ -457,21 +402,6 @@ class _CctvFeedScreenState extends State<CctvFeedScreen> {
                     if (ok) {
                       _browserCamActive = true;
                       _camError = false;
-                      _browserCamTimer?.cancel();
-                      _browserCamTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) async {
-                        if (!_browserCamActive || !mounted) return;
-                        final bytes = WebCameraHelper.captureFrame();
-                        if (bytes == null) return;
-                        try {
-                          final selected = _cameras.firstWhere((c) => c['id'] == _selectedCameraId, orElse: () => {});
-                          final res = await _backend.recognizeFrame(selected['name'] as String? ?? 'Browser', bytes);
-                          if (!mounted || !_browserCamActive) return;
-                          setState(() {
-                            _detections = res['detections'] ?? [];
-                            _hasThreat = res['has_threat'] == true;
-                          });
-                        } catch (_) {}
-                      });
                     }
                   });
                   if (!ok && mounted) {
